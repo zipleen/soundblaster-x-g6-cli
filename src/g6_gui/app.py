@@ -10,7 +10,7 @@ from toga.style.pack import COLUMN, ROW, Pack
 
 from g6_cli.g6_api import G6Api
 
-from g6_gui import VERSION, pages, widgets
+from g6_gui import VERSION, native, pages, widgets
 from g6_gui.controller import G6Controller
 
 WINDOW_SIZE = (860, 620)
@@ -39,6 +39,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_api(args: argparse.Namespace):
     """Construct the G6Api. Raises IOError when no device is attached."""
+    # In a packaged .app there is no system libusb to find; point pyusb at the
+    # copy inside the bundle before the first device lookup.
+    native.ensure_libusb()
     return G6Api(dry_run=args.dry_run, debug=args.debug, persist_model=not args.no_persist)
 
 

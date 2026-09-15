@@ -84,3 +84,34 @@ base_python = ["{env:HOME}/.pyenv/versions/3.12.3/bin/python"]
 #
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+#
+# Tool: briefcase (macOS .app / .dmg packaging)
+#
+[tool.briefcase]
+project_name = "Sound Blaster X G6"
+bundle = "dev.g6cli"
+version = "1.1.0"
+author = "Nils Skowasch"
+author_email = "nils_s89_dev@gmx.de"
+url = "https://github.com/nils-skowasch/soundblaster-x-g6-cli"
+
+[tool.briefcase.app.g6_gui]
+formal_name = "Sound Blaster X G6"
+description = "Control the Sound Blaster X G6 USB sound card"
+long_description = """A desktop GUI for the Sound Blaster X G6, exposing the
+controls of soundblaster-x-g6-cli as native widgets.
+"""
+icon = "packaging/resources/g6"
+sources = ["src/g6_gui", "src/g6_cli"]
+requires = [
+    "hidapi==0.15.0",
+    "pyusb==1.3.1",
+]
+
+[tool.briefcase.app.g6_gui.macOS]
+universal_build = false
+requires = [
+    "toga-cocoa>=0.5.6",
+    "std-nslog>=1.0.3",
+]

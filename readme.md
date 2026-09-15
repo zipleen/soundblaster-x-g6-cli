@@ -32,6 +32,20 @@ The GUI is built with Toga (BSD-3-Clause), which is compatible with this
 project's GPL-2.0-only licence; Qt bindings are not, and were deliberately
 avoided.
 
+### Standalone macOS app
+
+To build a self-contained `.app` and `.dmg` that need neither Python nor
+Homebrew on the target machine:
+
+```bash
+packaging/build-macos.sh
+```
+
+Open the resulting `dist/Sound Blaster X G6-<version>.dmg`, drag the app into
+Applications, and double-click it. See [packaging/README.md](packaging/README.md)
+for build requirements, the self-containment checks, and the Gatekeeper caveat
+for downloaded copies.
+
 See [docs/gui.md](docs/gui.md) for the full guide, including the SBX
 editing-profile vs active-profile semantics.
 

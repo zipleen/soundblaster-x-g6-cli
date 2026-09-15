@@ -3,3 +3,10 @@ venv
 __pycache__
 dist
 soundblaster_x_g6_cli.egg-info
+
+# macOS packaging
+.briefcase/
+build/
+dist/
+.build-venv/
+*.dmg
