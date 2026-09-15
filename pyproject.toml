@@ -42,8 +42,12 @@ keywords = ["SoundBlaster X G6", "SoundBlaster X G6 CLI", "CLI"]
 [project.urls]
 Repository = "https://github.com/nils-skowasch/soundblaster-x-g6-cli"
 #
+[project.optional-dependencies]
+gui = ["toga>=0.5.6"]
+
 [project.scripts]
 soundblaster-x-g6-cli = "g6_cli:main"
+soundblaster-x-g6-gui = "g6_gui:main"
 
 #
 # Tool: package-dir
