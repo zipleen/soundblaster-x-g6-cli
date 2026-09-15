@@ -88,3 +88,24 @@ async def test_model_is_exposed_for_initial_widget_values():
     controller = G6Controller(api)
     assert controller.model is api.get_model()
     controller.shutdown()
+
+
+async def test_on_success_runs_only_after_a_successful_call():
+    api = FakeG6Api()
+    controller = G6Controller(api)
+    seen = []
+    controller.submit("claim_audio_interface", on_success=lambda: seen.append("ok"))
+    await controller.flush()
+    assert seen == ["ok"]
+    controller.shutdown()
+
+
+async def test_on_success_is_skipped_when_the_call_fails():
+    api = FakeG6Api()
+    api.fail_next(RuntimeError("nope"))
+    controller = G6Controller(api, on_error=lambda m: None)
+    seen = []
+    controller.submit("claim_audio_interface", on_success=lambda: seen.append("ok"))
+    await controller.flush()
+    assert seen == []
+    controller.shutdown()

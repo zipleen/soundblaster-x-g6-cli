@@ -51,10 +51,20 @@ class G6Controller:
         return await loop.run_in_executor(self._executor, lambda: target(**kwargs))
 
     def submit(
-        self, method: str, *, revert: Callable[[], None] | None = None, **kwargs
+        self,
+        method: str,
+        *,
+        revert: Callable[[], None] | None = None,
+        on_success: Callable[[], None] | None = None,
+        **kwargs,
     ) -> None:
-        """Fire a device call from a synchronous Toga handler. Returns immediately."""
-        self._spawn(self._guarded(method, revert, kwargs))
+        """Fire a device call from a synchronous Toga handler. Returns immediately.
+
+        `on_success` runs only if the call succeeded, as part of the same tracked
+        unit of work that `flush()` awaits — so a caller doing
+        `submit(...); await flush()` is guaranteed to observe its effect.
+        """
+        self._spawn(self._guarded(method, revert, kwargs, on_success))
 
     def debounced(
         self,
@@ -119,7 +129,7 @@ class G6Controller:
         task.add_done_callback(self._in_flight.discard)
         return task
 
-    async def _guarded(self, method: str, revert, kwargs: dict) -> None:
+    async def _guarded(self, method: str, revert, kwargs: dict, on_success=None) -> None:
         try:
             await self.call(method, **kwargs)
         except asyncio.CancelledError:
@@ -134,3 +144,6 @@ class G6Controller:
                 revert()
             if self._on_error is not None:
                 self._on_error(f"{method} failed: {exc}")
+        else:
+            if on_success is not None:
+                on_success()
