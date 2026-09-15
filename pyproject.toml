@@ -70,7 +70,7 @@ env_list = ["py312"]
 
 [tool.tox.env_run_base]
 description = "run tests"
-deps = ["pytest>=9"]
+deps = ["pytest>=9", "pytest-asyncio>=1.0", "toga>=0.5.6"]
 commands = [
     ["pytest", "{posargs:tests}"],
 ]
@@ -78,3 +78,9 @@ commands = [
 [tool.tox.env.py312]
 description = "Run tests under Python 3.12 installed with pyenv"
 base_python = ["{env:HOME}/.pyenv/versions/3.12.3/bin/python"]
+
+#
+# Tool: pytest
+#
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
