@@ -49,3 +49,17 @@ def test_set_enabled_reaches_nested_widgets():
     assert row.slider.enabled is False
     widgets.set_enabled(container, True)
     assert row.slider.enabled is True
+
+
+def test_set_enabled_descends_through_a_scroll_container():
+    """page() wraps rows in a ScrollContainer whose .children is always empty."""
+    inner = widgets.section("Mixer")
+    row = widgets.slider_row("Line In", min=0, max=100, value=0, on_change=lambda w: None)
+    inner.add(row)
+    content = widgets.page(inner)
+
+    widgets.set_enabled(content, False)
+    assert row.slider.enabled is False
+
+    widgets.set_enabled(content, True)
+    assert row.slider.enabled is True

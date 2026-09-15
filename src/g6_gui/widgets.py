@@ -116,9 +116,21 @@ def warning(text: str) -> toga.Label:
     return toga.Label(text, style=_WARNING_STYLE)
 
 
-def set_enabled(box: toga.Box, enabled: bool) -> None:
-    """Recursively enable/disable every interactive widget in a container."""
-    for child in getattr(box, "children", []) or []:
+def set_enabled(box: toga.Widget, enabled: bool) -> None:
+    """Recursively enable/disable every interactive widget in a container.
+
+    Descends through both ``children`` and ``content``. The ``content`` branch
+    matters: ``page()`` wraps its rows in a ``ScrollContainer``, whose
+    ``children`` is always empty because it holds a single ``content`` widget
+    instead. Without that branch, disabling a whole page silently does nothing.
+    """
+    for child in getattr(box, "children", None) or []:
         if hasattr(child, "enabled"):
             child.enabled = enabled
         set_enabled(child, enabled)
+
+    content = getattr(box, "content", None)
+    if isinstance(content, toga.Widget):
+        if hasattr(content, "enabled"):
+            content.enabled = enabled
+        set_enabled(content, enabled)

@@ -82,7 +82,8 @@ class G6Controller:
             await self._guarded(method, revert, kwargs)
 
         task = self._spawn(later())
-        self._pending[key] = task
+        if isinstance(task, asyncio.Task):
+            self._pending[key] = task
 
     async def flush(self) -> None:
         """Await every pending debounce and in-flight call. Used by tests."""
@@ -98,7 +99,21 @@ class G6Controller:
 
     # ── internals ──
 
-    def _spawn(self, coro) -> asyncio.Task:
+    def _spawn(self, coro):
+        """Schedule `coro` on the running loop.
+
+        Toga event handlers normally run with the app's asyncio loop active, so
+        this is just `ensure_future`. Outside a running loop — a synchronous
+        test, or a handler invoked directly — `ensure_future` would raise and
+        Toga would swallow the traceback, silently dropping the device call. In
+        that case run the coroutine to completion instead, so the call still
+        happens and the failure mode is visible rather than silent.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
         task = asyncio.ensure_future(coro)
         self._in_flight.add(task)
         task.add_done_callback(self._in_flight.discard)
