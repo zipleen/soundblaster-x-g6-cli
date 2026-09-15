@@ -13,6 +13,29 @@ I read pretty often that you are able to damage or brick a USB device if you sen
 That's why I want to point out, that you **USE THIS CLI AT YOUR OWN RISK**! I am not responsible for any damage to your
 system or your device!
 
+## Desktop GUI
+
+A cross-platform desktop GUI (Linux and macOS) is available alongside the CLI,
+exposing every CLI option as a native control:
+
+```bash
+pip install -e '.[gui]'
+soundblaster-x-g6-gui
+```
+
+On Linux it additionally needs system GTK (`python3-gi`, `gir1.2-gtk-3.0` on
+Debian/Ubuntu). macOS shows fewer controls than Linux, because the features that
+go through the USB AudioControl interface require detaching the kernel audio
+driver, which macOS does not permit.
+
+The GUI is built with Toga (BSD-3-Clause), which is compatible with this
+project's GPL-2.0-only licence; Qt bindings are not, and were deliberately
+avoided.
+
+See [docs/gui.md](docs/gui.md) for the full guide, including the SBX
+editing-profile vs active-profile semantics.
+
+
 ## Firmware version
 
 This software is tested with a G6 having the **Firmware version:** `2.1.250903.1324`.
