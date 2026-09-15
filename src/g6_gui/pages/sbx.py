@@ -139,8 +139,10 @@ def build(controller: G6Controller) -> toga.Widget:
             )
 
         toggle = widgets.switch_row(label, value=getattr(sbx, toggle_getter)(), on_change=on_toggle)
+        # The switch already carries the effect's name; repeating it on the
+        # slider row just prints "Bass" twice under itself.
         slider = widgets.slider_row(
-            label,
+            "",
             min=0,
             max=100,
             value=getattr(sbx, slider_getter)(),
@@ -189,10 +191,14 @@ def build(controller: G6Controller) -> toga.Widget:
         asyncio.ensure_future(refresh_after_switch())
 
     switch_button = toga.Button("Switch to this profile", on_press=on_switch_press)
+    switch_button_row = toga.Box(
+        style=toga.style.pack.Pack(direction=toga.style.pack.ROW, margin_bottom=12)
+    )
+    switch_button_row.add(switch_button)
 
     content.add(editing)
     content.add(banner)
-    content.add(switch_button)
+    content.add(switch_button_row)
 
     for attr, label, toggle_feature, slider_feature, toggle_getter, slider_getter in _EFFECTS:
         row = make_effect_row(attr, label, toggle_feature, slider_feature, toggle_getter, slider_getter)

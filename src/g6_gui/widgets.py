@@ -8,7 +8,7 @@ so callers — and tests — can read and write ``.value`` directly.
 from __future__ import annotations
 
 import toga
-from toga.style.pack import COLUMN, ROW, Pack
+from toga.style.pack import CENTER, COLUMN, ROW, Pack
 
 LABEL_WIDTH = 160
 
@@ -16,14 +16,33 @@ _NOTE_STYLE = Pack(color="#888888", font_size=11)
 _WARNING_STYLE = Pack(color="#B25000", font_size=11)
 
 
+class _Page(toga.Box):
+    """A page box whose ``add()`` targets its scrollable column.
+
+    Without this, ``page()`` followed by ``content.add(row)`` would drop the row
+    next to the ScrollContainer rather than inside it. Because the scroller is
+    ``flex=1`` it expands and pushes those rows to the bottom of the window,
+    leaving a large empty gap above them.
+    """
+
+    _column = None
+
+    def add(self, *children: toga.Widget) -> None:
+        if self._column is None:
+            super().add(*children)
+        else:
+            self._column.add(*children)
+
+
 def page(*children: toga.Widget) -> toga.Box:
     """A scrollable column page with margins."""
     column = toga.Box(style=Pack(direction=COLUMN, margin=10))
+    scroller = toga.ScrollContainer(content=column, style=Pack(flex=1))
+    outer = _Page(style=Pack(direction=COLUMN, flex=1))
+    toga.Box.add(outer, scroller)
+    outer._column = column
     for child in children:
         column.add(child)
-    scroller = toga.ScrollContainer(content=column, style=Pack(flex=1))
-    outer = toga.Box(style=Pack(direction=COLUMN, flex=1))
-    outer.add(scroller)
     return outer
 
 
@@ -56,7 +75,7 @@ def slider_row(
     label: str, *, min: int, max: int, value: int, step: int = 1, on_change
 ) -> toga.Box:
     lo, hi = min, max
-    row = toga.Box(style=Pack(direction=ROW, margin_bottom=5))
+    row = toga.Box(style=Pack(direction=ROW, margin_bottom=5, align_items=CENTER, gap=8))
     caption = toga.Label(label, style=Pack(width=LABEL_WIDTH))
     readout = toga.Label(str(value), style=Pack(width=48, text_align="right"))
 
@@ -77,7 +96,9 @@ def slider_row(
         readout.text = str(snapped)
         on_change(widget)
 
-    slider = toga.Slider(min=lo, max=hi, value=value, on_change=handle_change)
+    slider = toga.Slider(
+        min=lo, max=hi, value=value, on_change=handle_change, style=Pack(flex=1)
+    )
 
     row.add(caption)
     row.add(slider)
@@ -88,7 +109,7 @@ def slider_row(
 
 
 def select_row(label: str, *, items: list[str], value: str | None, on_change) -> toga.Box:
-    row = toga.Box(style=Pack(direction=ROW, margin_bottom=5))
+    row = toga.Box(style=Pack(direction=ROW, margin_bottom=5, align_items=CENTER, gap=8))
     caption = toga.Label(label, style=Pack(width=LABEL_WIDTH))
     selection = toga.Selection(items=items, value=value, on_change=on_change)
     row.add(caption)

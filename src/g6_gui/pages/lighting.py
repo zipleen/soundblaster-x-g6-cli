@@ -22,7 +22,7 @@ def build(controller: G6Controller) -> toga.Widget:
     initial_enabled = lighting.get_enabled()
     initial_red, initial_green, initial_blue = lighting.get_rgb()
 
-    swatch = toga.Box(style=Pack(height=40, background_color=_hex_colour(
+    swatch = toga.Box(style=Pack(width=120, height=28, background_color=_hex_colour(
         initial_red, initial_green, initial_blue
     )))
 

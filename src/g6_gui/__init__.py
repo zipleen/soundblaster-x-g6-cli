@@ -5,6 +5,6 @@ VERSION = "1.1.0"
 
 def main():
     """Entry point for the ``soundblaster-x-g6-gui`` script."""
-    from g6_gui.app import G6App
+    from g6_gui.app import main as app_main
 
-    return G6App().main_loop()
+    return app_main().main_loop()
