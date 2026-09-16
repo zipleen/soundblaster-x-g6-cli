@@ -37,13 +37,13 @@ jobs:
 
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0   # tags are needed to tell whether this version shipped
 
       - name: Set up Python 3.12
         id: setup-python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -174,9 +174,13 @@ jobs:
           ')"
           # The mode is in the filename so a notarised and an unsigned build can
           # never be mistaken for each other once downloaded.
-          DMG="dist/Sound-Blaster-X-G6-${VERSION}-macos-arm64-${MODE}.dmg"
+          NAME="Sound-Blaster-X-G6-${VERSION}-macos-arm64-${MODE}.dmg"
+          DMG="dist/$NAME"
           [ "$BUILT" = "$DMG" ] || mv "$BUILT" "$DMG"
-          shasum -a 256 "$DMG" > "$DMG.sha256"
+          # Checksum recorded against the bare filename: the two assets sit next
+          # to each other once downloaded, so `shasum -c <file>.sha256` must work
+          # there rather than looking for a dist/ directory.
+          ( cd dist && shasum -a 256 "$NAME" > "$NAME.sha256" )
 
           echo "dmg=$DMG"         >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -187,7 +191,7 @@ jobs:
       - name: Upload the build as a workflow artifact
         # Kept whether or not a release is published, so every build on main is
         # downloadable.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sound-blaster-x-g6-macos-${{ steps.build_info.outputs.version }}-${{ steps.mode.outputs.mode }}
           path: |
