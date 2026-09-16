@@ -47,8 +47,18 @@ for build requirements, the self-containment checks, and the Gatekeeper caveat
 for downloaded copies. To produce a build that opens with no Gatekeeper warning,
 see [packaging/NOTARIZING.md](packaging/NOTARIZING.md).
 
-Pushes to `main` build the app in CI and publish a GitHub Release whenever the
-`version` in `pyproject.toml` has not been released yet.
+Pushes to `main-gui` build the app in CI and publish a GitHub Release whenever
+the `version` in `pyproject.toml` has not been released yet.
+
+#### Branches in this fork
+
+| Branch | Purpose |
+|---|---|
+| `main` | A clean mirror of the upstream project. Nothing is added here, so it can always be fast-forwarded from `nils-skowasch/soundblaster-x-g6-cli` — and a pull request from this fork stays reviewable. |
+| `main-gui` | This distribution: upstream plus the GUI and macOS packaging. Releases are built from here. |
+
+Keeping the GUI off `main` means upstream can be tracked without conflicts, and
+the GUI can be offered upstream later as a self-contained change.
 
 See [docs/gui.md](docs/gui.md) for the full guide, including the SBX
 editing-profile vs active-profile semantics.

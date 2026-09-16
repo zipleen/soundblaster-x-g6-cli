@@ -3,6 +3,10 @@ name: macOS app
 # Builds the self-contained macOS bundle and publishes a GitHub Release when the
 # version in pyproject.toml has not been released yet.
 #
+# Runs on main-gui, not main. `main` is kept as a clean mirror of the upstream
+# project (nils-skowasch/soundblaster-x-g6-cli) so it stays trivially
+# fast-forwardable from it; main-gui is this distribution's branch.
+#
 # Two build modes, chosen automatically:
 #   * signing secrets present -> Developer ID signed + notarised
 #   * secrets absent          -> ad-hoc signed (Gatekeeper warns on download)
@@ -10,7 +14,7 @@ name: macOS app
 # See packaging/NOTARIZING.md for which secrets to set.
 on:
   push:
-    branches: [main]
+    branches: [main-gui]
   workflow_dispatch:
     inputs:
       force_release:
