@@ -31,7 +31,7 @@ across reboots and across operating systems.
 | Setting | What it changes | Works over USB on macOS? |
 |---|---|---|
 | Output (Speakers/Headphones) | Front headphone jack vs rear line/optical jack | Yes |
-| Direct Mode | One position of an `Audio Effects · Direct · SPDIF-Out Direct` radio — not a switch | **No — inert on macOS** (confirmed by ear). Use [Audio MIDI Setup → Clock Source](#macos-audio-midi-setup-is-the-real-control) |
+| Direct Mode | One position of an `Audio Effects · Direct · SPDIF-Out Direct` radio — not a switch | **No — inert on macOS** (confirmed by ear). Controlled from the [macOS Audio tab](#this-app-now-controls-it-directly--the-macos-audio-tab) instead |
 | SPDIF-Out Direct Mode | Bypass for the optical output **only**; mutually exclusive with Direct Mode | **Unknown.** macOS has no equivalent setting, so it may well work — untested |
 | Filter | The DAC's reconstruction filter (4 variants) | Yes, but inaudible — see below |
 | Decoder mode | Dolby Digital dynamic-range compression | **No.** Needs a Dolby bitstream on optical in |
@@ -452,8 +452,128 @@ switching Clock Source back to *DSP Clock* breaks audio — DSP Clock cannot do
 2. Set the format to something DSP Clock supports — **2 ch, 24-bit, 48 kHz**.
 3. *Now* switch to **DSP Clock**. Effects return.
 
-So: **drop the sample rate before changing clock source**, not after. Worth a
-line in any UI help text about Direct Mode on macOS.
+So: **drop the sample rate before changing clock source**, not after.
+
+## This app now controls it directly — the macOS Audio tab
+
+The gotcha above used to be something you had to do by hand in Apple's Audio
+MIDI Setup. It no longer is: a **macOS Audio** tab in this GUI reads and writes
+the G6's Clock Source and Format directly, through the same public Core Audio
+API Audio MIDI Setup itself uses (`AudioObjectGetPropertyData` /
+`AudioObjectSetPropertyData` on `kAudioDevicePropertyClockSource` and
+`kAudioStreamPropertyPhysicalFormat`), and automates the switch-back handoff
+above so it cannot wedge the device from inside this app.
+
+**[bytes]**, in the same evidentiary sense the rest of this document uses that
+tag — not USB HID bytes this time, but the exact FourCC property selectors and
+struct layouts, read directly out of this machine's Xcode SDK headers
+(`AudioHardware.h`, `AudioHardwareBase.h`, `CoreAudioBaseTypes.h`), not from
+memory. `kAudioObjectPropertyName` in particular is `'lnam'`, not the `'name'`
+a first guess would produce — confirmed by checking the header rather than
+trusting recall, exactly the discipline the rest of this document tries to
+hold itself to.
+
+### How it identifies the G6
+
+Not by name. Nothing in this codebase has confirmed what Core Audio actually
+calls the G6 — it was unplugged while this was built. Instead, the tab scans
+every audio device Core Audio reports and picks out the one whose Clock Source
+options are exactly `{"DSP Clock", "Stereo Direct"}` — the one fact confirmed
+for certain, from Creative's own documentation, about this specific device.
+Anything that does not match that exact shape (extra clock sources, only one
+of the two, different names entirely) is treated as *not found* and the tab
+greys out with an explanation, rather than guessing at an unfamiliar
+configuration. This was an explicit part of the request this was built for —
+support the G6's own two modes, nothing more elaborate.
+
+### The safe handoff, automated
+
+Switching **to DSP Clock** while the current rate exceeds 48 kHz now
+automatically drops the format to 48 kHz first (preferring 24-bit if the
+device offers it there, otherwise whatever bit depth it does offer at
+48 kHz) — reproducing, in code, the exact manual recovery above — before
+touching the clock source at all. Confirmed to matter, not theoretical:
+picking the *wrong* fallback (the lowest available rate rather than 48 kHz
+specifically) was an actual bug caught while validating this against real
+Core Audio, before it ever reached this document.
+
+### Confirmed against the real G6 — no longer a guess
+
+The section above documented this before hardware was available. It has since
+been plugged in and this feature tried against it directly, so the following
+is no longer "should work" — it is what actually happened.
+
+**[this Mac]** Core Audio calls the device exactly `Sound BlasterX G6` (visible
+in `system_profiler SPAudioDataType` once connected). The fingerprint-based
+identification — deliberately built to *not* depend on knowing that name —
+found it correctly regardless, and its clock sources are spelled precisely
+`"DSP Clock"` and `"Stereo Direct"`, exactly as this document assumed from
+Creative's documentation.
+
+**[this Mac]** The full flow works end to end: the tab detects the device,
+reads the real current Clock Source and Format, switches between DSP Clock and
+Stereo Direct, and Recording/SBX disable themselves correctly the moment
+Stereo Direct is confirmed active. Changing the clock source in Apple's own
+Audio MIDI Setup, outside this app entirely, is also picked up correctly here
+— confirmed by switching there and pressing Refresh.
+
+**[this Mac]** DSP Clock's real format list is capped at 48 kHz, exactly as
+documented — 8 entries. Stereo Direct offers 32, up to 384 kHz.
+
+#### A real discovery: the G6 offers two variants of every format
+
+The G6's available-format list was not simply large — it contained what first
+looked like duplicate entries: two of every (bit depth, sample rate)
+combination. Read as raw `AudioStreamBasicDescription` structs rather than
+through the simplified view this tab originally used, they turned out to be
+genuinely different: one ordinary, and one with
+`kAudioFormatFlagIsNonMixable` set — Core Audio's *exclusive mode*, which
+bypasses its mixer entirely so no other application can share the device while
+it is active. This is a real, meaningful option for bit-perfect playback, not
+a bug in the G6's own format table.
+
+It **was** a bug in this tab, though: the `Format` type used to compare
+(rate, bits, channels) only, so the two variants were indistinguishable —
+identical labels in the dropdown, and picking the second of a pair silently
+resolved back to the first every time. Fixed by tracking the flag explicitly;
+the exclusive variant is now labelled `(Exclusive)` and is a genuinely
+separate, selectable option.
+
+#### Settle timing is real hardware variance, not a bug
+
+Two things were confirmed live and are worth relying on as documented
+behaviour rather than treating as flakiness to chase further:
+
+- **The Clock Source and the Format list update on different schedules.**
+  `current_clock_source` flips within about 20ms of a switch; the stream's
+  *available*-format list — a separate Core Audio property — lags behind by
+  roughly 100-200ms before it reflects the new clock source. The tab now
+  explicitly waits for the format list to actually change before finishing a
+  clock-source switch, rather than returning with the old list still showing.
+- **How long a switch takes is inconsistent.** Most settle in well under
+  300ms. The same operation, run repeatedly with nothing else different, was
+  twice observed to take over a second. No pattern predicted which attempts
+  would be slow — not the direction, not whether another switch had just
+  completed. This is treated as real, unexplained hardware/driver variance:
+  the settle-poll budget is generous (several seconds) precisely because of
+  this, and it costs nothing in practice since the wait never blocks the UI
+  thread.
+
+**The honest confidence level now:** working, live, on the actual hardware —
+this is no longer a mechanism-only validation with an open question about the
+device. What remains genuinely open is documented below.
+
+### Cross-tab effect
+
+Recording and SBX are automatically disabled whenever this tab confirms Clock
+Source is Stereo Direct — both drive the G6's DSP over its USB HID protocol,
+which Stereo Direct bypasses entirely, so they would send commands that do
+nothing. They stay enabled whenever the clock source is DSP Clock, and,
+deliberately, whenever it cannot be positively identified at all — an
+ambiguous read is not treated as evidence of Stereo Direct, since disabling
+tabs on a guess would be worse than leaving them alone. See
+[coreaudio.py](../src/g6_gui/coreaudio.py) and `_apply_clock_source_gate` in
+[app.py](../src/g6_gui/app.py).
 
 The 48 kHz cap is worth dwelling on: Creative's marketing figure for non-direct
 playback is 96 kHz, but **on macOS the DSP path tops out at 48 kHz**. If you want
@@ -1047,6 +1167,11 @@ Changes made to the UI as a result of this research:
 | **Smart Volume special moved directly under Smart Volume** | It overrides the Smart Volume slider, so stranding it at the bottom of the tab hid the relationship. |
 | **Changing "Editing profile" no longer writes to the device** | It was silently performing the profile switch. See [the bug](#bug-changing-editing-profile-already-switches-the-profile). |
 | **A note under Decoder mode** saying it only affects Dolby over optical | The single most confusing "this does nothing" in the app. |
+| **A new macOS Audio tab** reads and switches Clock Source/Format directly via Core Audio, and disables Recording/SBX while Stereo Direct is active | Turns the manual Audio MIDI Setup workaround into something this app does for you, safely. Confirmed working against a real G6. See [the section above](#this-app-now-controls-it-directly--the-macos-audio-tab). |
+| **macOS Audio is the first tab**, not the last | It is the actual Direct Mode control on macOS — the most consequential setting on the whole device — so it leads rather than being buried after Playback. |
+| **The status line shows the current Format, not just the Clock Source** | Both matter for knowing what is actually playing; showing only one was an oversight. |
+| **Exclusive-mode formats are labelled `(Exclusive)`** and are genuinely distinct, selectable entries | They used to be indistinguishable duplicates of the ordinary format at the same rate/bit depth — a real bug, caught once real hardware was available. See [the discovery above](#a-real-discovery-the-g6-offers-two-variants-of-every-format). |
+| **Switching Clock Source now waits for the Format list to catch up** before finishing | The two properties update on different schedules; returning immediately left the Format dropdown showing the previous clock source's list. |
 
 Still deliberately *not* changed, and why:
 
@@ -1058,6 +1183,10 @@ Still deliberately *not* changed, and why:
   **[inferred]** rather than confirmed.
 - **The profile model** still has four local slots with no Creative preset
   content.
+- **The macOS Audio tab does not cover SPDIF-Out Direct.** It is a Clock
+  Source option, and SPDIF-Out Direct has no Clock Source equivalent (see
+  [what the clock source does not cover](#what-the-clock-source-does-not-cover)) —
+  there is nothing in Core Audio for this tab to read or write for it.
 
 ---
 
@@ -1083,6 +1212,21 @@ everyone else — which would make the sidetone slider actively misleading.
 
 Test: set monitoring to 100% and recording to 10%, then have someone confirm your
 level; repeat with monitoring at 0%.
+
+### 1b. Does the macOS Audio tab actually find and control a real G6? **[this Mac] — confirmed**
+
+Resolved: yes. See [confirmed against the real G6](#confirmed-against-the-real-g6--no-longer-a-guess).
+
+### 1c. Why does a clock-source switch occasionally take over a second? **[unknown]**
+
+Confirmed real and reproducible, cause not identified. Most switches settle in
+under 300ms; twice, the identical operation took over a second with nothing
+else different. Candidates, none confirmed: USB transaction queuing on the
+G6 side, some macOS-side re-enumeration of the device's properties after a
+mode change, or something else entirely. The settle-poll budget in
+`coreaudio.py` is generous specifically because of this. Worth revisiting if
+it turns out to correlate with something identifiable — logging the exact
+timing of many consecutive switches would be the way to look.
 
 ### 2. Does this app's Direct Mode packet do anything on Windows? **[unknown]**
 

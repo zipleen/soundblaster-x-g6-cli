@@ -60,7 +60,9 @@ def test_build_pages_returns_a_tab_per_visible_page(monkeypatch):
 
     controller = G6Controller(FakeG6Api())
     tabs, gated = app_module.build_pages(controller)
-    assert [title for title, _ in tabs] == ["Playback", "Recording", "SBX", "Lighting", "System"]
+    assert [title for title, _ in tabs] == [
+        "macOS Audio", "Playback", "Recording", "SBX", "Lighting", "System",
+    ]
     assert gated == []  # nothing audio-gated is built on a non-Linux platform
     controller.shutdown()
 
@@ -72,6 +74,95 @@ def test_build_pages_collects_audio_gated_boxes_on_linux(monkeypatch):
 
     controller = G6Controller(FakeG6Api())
     tabs, gated = app_module.build_pages(controller)
-    assert [title for title, _ in tabs][0] == "Playback"
+    assert [title for title, _ in tabs][0] == "macOS Audio"
     assert len(gated) == 3  # mixer page + playback audio_section + recording audio_section
+    controller.shutdown()
+
+
+def test_recording_and_sbx_are_disabled_when_stereo_direct_is_active(monkeypatch):
+    """Reproduces the request directly: those tabs must be disabled whenever
+    macOS's Clock Source is Stereo Direct, since the G6's DSP -- which is what
+    Recording and SBX both drive -- is bypassed entirely in that mode."""
+    from g6_gui import coreaudio as ca
+    from g6_gui.controller import G6Controller
+    from g6_gui.pages import macos_audio
+    from tests.g6_gui.fake_coreaudio import FakeHal
+
+    hal = FakeHal(current_clock_source_code=1)  # 1 = Stereo Direct, see FakeHal defaults
+    monkeypatch.setattr(macos_audio, "_make_clock_controller", lambda: ca.ClockController(hal=hal))
+
+    controller = G6Controller(FakeG6Api())
+    tabs, _ = app_module.build_pages(controller)
+    by_title = dict(tabs)
+
+    # set_enabled recurses into a box's children/content but never sets
+    # .enabled on the box passed in itself -- same convention every other
+    # gate in this app follows (claim-gating, audio-interface gating), so
+    # check a representative leaf control, exactly as those pages' own tests
+    # do (see recording_test.py / sbx_test.py).
+    assert by_title["Recording"].mic_boost.slider.enabled is False
+    assert by_title["SBX"].surround.toggle.switch.enabled is False
+    # Everything else stays untouched by this particular gate.
+    assert by_title["Playback"].output.selection.enabled is True
+    controller.shutdown()
+
+
+def test_recording_and_sbx_stay_enabled_when_dsp_clock_is_active(monkeypatch):
+    from g6_gui import coreaudio as ca
+    from g6_gui.controller import G6Controller
+    from g6_gui.pages import macos_audio
+    from tests.g6_gui.fake_coreaudio import FakeHal
+
+    hal = FakeHal(current_clock_source_code=0)  # 0 = DSP Clock
+    monkeypatch.setattr(macos_audio, "_make_clock_controller", lambda: ca.ClockController(hal=hal))
+
+    controller = G6Controller(FakeG6Api())
+    tabs, _ = app_module.build_pages(controller)
+    by_title = dict(tabs)
+
+    assert by_title["Recording"].mic_boost.slider.enabled is True
+    assert by_title["SBX"].surround.toggle.switch.enabled is True
+    controller.shutdown()
+
+
+def test_recording_and_sbx_stay_enabled_when_the_clock_source_is_unrecognised(monkeypatch):
+    """Conservative by design: an ambiguous read must not speculatively
+    disable tabs that might still work fine. See _apply_clock_source_gate."""
+    from g6_gui import coreaudio as ca
+    from g6_gui.controller import G6Controller
+    from g6_gui.pages import macos_audio
+    from tests.g6_gui.fake_coreaudio import FakeHal
+
+    hal = FakeHal(clock_sources=[ca.ClockSource(0, "Internal"), ca.ClockSource(1, "External")])
+    monkeypatch.setattr(macos_audio, "_make_clock_controller", lambda: ca.ClockController(hal=hal))
+
+    controller = G6Controller(FakeG6Api())
+    tabs, _ = app_module.build_pages(controller)
+    by_title = dict(tabs)
+
+    assert by_title["Recording"].mic_boost.slider.enabled is True
+    assert by_title["SBX"].surround.toggle.switch.enabled is True
+    controller.shutdown()
+
+
+def test_switching_to_stereo_direct_live_disables_recording_and_sbx(monkeypatch):
+    """The gate must react to a change made *after* the tabs were built, not
+    only reflect whatever the clock source was at startup."""
+    from g6_gui import coreaudio as ca
+    from g6_gui.controller import G6Controller
+    from g6_gui.pages import macos_audio
+    from tests.g6_gui.fake_coreaudio import FakeHal
+
+    hal = FakeHal(current_clock_source_code=0)
+    monkeypatch.setattr(macos_audio, "_make_clock_controller", lambda: ca.ClockController(hal=hal))
+
+    controller = G6Controller(FakeG6Api())
+    tabs, _ = app_module.build_pages(controller)
+    by_title = dict(tabs)
+    assert by_title["Recording"].mic_boost.slider.enabled is True
+
+    by_title["macOS Audio"].clock_source.selection.value = "Stereo Direct"
+
+    assert by_title["Recording"].mic_boost.slider.enabled is False
+    assert by_title["SBX"].surround.toggle.switch.enabled is False
     controller.shutdown()

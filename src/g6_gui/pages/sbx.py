@@ -22,6 +22,7 @@ import toga
 from g6_cli.g6_model.sbx import Profile
 from g6_cli.g6_spec import AudioFeature, SmartVolumeSpecialHex
 from g6_gui import convert, help as help_text, widgets
+from g6_gui.platform import IS_MACOS
 from g6_gui.controller import G6Controller
 
 TITLE = "SBX"
@@ -119,6 +120,9 @@ def build(controller: G6Controller) -> toga.Widget:
         return state["editing"]
 
     content = widgets.page()
+
+    if IS_MACOS:
+        content.add(widgets.note_block(help_text.RECORDING_SBX_DISABLED_BY_CLOCK_SOURCE))
 
     banner = widgets.note(_banner_text(state["editing"], active_profile))
 

@@ -10,7 +10,9 @@ from tests.g6_gui.fake_api import FakeG6Api
 
 def test_all_pages_are_registered_in_display_order():
     titles = [module.TITLE for module in pages.ALL]
-    assert titles == ["Playback", "Mixer", "Recording", "SBX", "Lighting", "System"]
+    assert titles == [
+        "macOS Audio", "Playback", "Mixer", "Recording", "SBX", "Lighting", "System",
+    ]
 
 
 @pytest.mark.parametrize("module", pages.ALL, ids=lambda m: m.TITLE)

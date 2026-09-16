@@ -126,3 +126,20 @@ def test_set_enabled_reaches_controls_behind_a_help_wrapper():
     assert row.slider.enabled is False
     widgets.set_enabled(row, True)
     assert row.slider.enabled is True
+
+
+def test_dynamic_note_block_can_be_retexted_with_a_different_number_of_lines():
+    block = widgets.dynamic_note_block("short")
+    assert block.lines == ["short"]
+
+    block.set_text("word " * 80)
+    assert len(block.lines) > 1
+    assert all(len(line) <= widgets.HELP_WRAP_COLUMNS for line in block.lines)
+
+    block.set_text("back to short")
+    assert block.lines == ["back to short"]
+
+
+def test_dynamic_warning_block_uses_the_warning_style():
+    block = widgets.dynamic_warning_block("careful")
+    assert block.children[0].style.color == widgets._WARNING_STYLE.color

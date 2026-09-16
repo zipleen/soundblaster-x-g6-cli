@@ -90,8 +90,13 @@ running.
 
 ## Tabs
 
+macOS Audio is listed first — it is the actual Direct Mode control on macOS,
+the most consequential setting on the device, so it leads rather than being
+buried after Playback:
+
 | Tab | Contents |
 |---|---|
+| **macOS Audio** | *macOS only.* Clock Source (DSP Clock / Stereo Direct) and Format, read and set directly via Core Audio — see below |
 | **Playback** | Output (Speakers/Headphones), Direct Mode, SPDIF-Out Direct Mode, Filter, Decoder mode, *and on Linux* mute, volume + channels, speaker/headphone Stereo·5.1·7.1 |
 | **Mixer** | *Linux only.* Playback mute, plus monitoring and recording mute/volume/channels for Line In, External Mic, SPDIF In and What U Hear |
 | **Recording** | Mic boost, Voice Clarity (Noise Reduction + level, Acoustic Echo Cancellation, Smart Volume, Mic Equalizer + preset), *and on Linux* mute and mic recording/monitoring volumes |
@@ -112,28 +117,55 @@ how confident we are in each claim — see
 condensed version of that document, and both are generated from the same source
 (`src/g6_gui/help.py`).
 
-## Direct Mode on macOS
+## Direct Mode on macOS — the macOS Audio tab
 
-Direct Mode cannot be set by this app on macOS, so its switch is **disabled** on
-the Playback tab. macOS continuously asserts the device's mode through Core
+Direct Mode cannot be set by this app's Playback tab on macOS, so its switch is
+**disabled** there. macOS continuously asserts the device's mode through Core
 Audio and overwrites whatever the G6 was told — Creative documents this
 themselves.
 
-**SPDIF-Out Direct is left enabled.** macOS's Clock Source has only two
-positions and neither corresponds to it, so it is *unverified* rather than
+**SPDIF-Out Direct on Playback is left enabled.** macOS's Clock Source has only
+two positions and neither corresponds to it, so it is *unverified* rather than
 known-broken; disabling it would have asserted a limitation nobody has shown and
 removed the only way to test it.
 
-Use **Audio MIDI Setup** instead; the Playback tab has a button that opens it.
-Select the G6 and set **Clock Source**:
+The real control lives in a dedicated **macOS Audio** tab, which reads and sets
+the G6's Clock Source and Format directly through Core Audio — the same
+mechanism Apple's own Audio MIDI Setup uses, so you no longer need to leave
+this app to switch modes:
 
 | Clock Source | What you get |
 |---|---|
 | **DSP Clock** | All effects available (SBX, filters), capped at 32-bit/48 kHz |
 | **Stereo Direct** | Direct Mode — bit-perfect up to 32-bit/384 kHz, no SBX, **no microphone** |
 
-One trap: DSP Clock cannot do 384 kHz. Drop the format to 2 ch/24-bit/48 kHz
-*before* switching back, or audio breaks until you do.
+Switching back from 384 kHz to DSP Clock is handled automatically: the tab
+drops the format to something DSP Clock supports *before* changing the clock
+source, so it cannot wedge the device the way doing this by hand can (DSP Clock
+cannot do 384 kHz, and Core Audio does not renegotiate the format for you).
+
+**Recording and SBX disable themselves automatically** whenever this tab
+confirms Stereo Direct is active — both drive the G6's DSP over its own USB
+protocol, which Stereo Direct bypasses entirely, so those controls would do
+nothing right now. They stay enabled if the clock source can't be positively
+identified, rather than guessing.
+
+**Confirmed working against a real G6**: the tab correctly identifies the
+device (Core Audio calls it `Sound BlasterX G6`, though the tab does not rely
+on knowing that — it identifies the device by its Clock Source shape instead),
+reads and switches between DSP Clock and Stereo Direct, and picks up changes
+made directly in Apple's Audio MIDI Setup too. If the tab ever reports it
+could not find the G6, try **Audio MIDI Setup** directly
+(`/Applications/Utilities/`) as a fallback, and see
+[docs/settings-reference.md](settings-reference.md#this-app-now-controls-it-directly--the-macos-audio-tab)
+for what that would mean.
+
+One quirk worth knowing about, not a bug: the Format list includes an
+`(Exclusive)` variant of several entries — Core Audio's exclusive/hog mode,
+which bypasses macOS's audio mixer entirely. Also, a Clock Source switch
+usually completes in well under a second but has occasionally taken longer on
+real hardware for reasons not yet identified; the tab waits rather than
+timing out prematurely.
 
 ## Why macOS shows fewer controls
 

@@ -56,17 +56,32 @@ def build_pages(controller: G6Controller):
     Returns ``(tabs, audio_gated)`` where ``tabs`` is a list of
     ``(title, content)`` and ``audio_gated`` holds the boxes that stay disabled
     until the USB AudioControl interface is claimed.
+
+    On macOS, Recording and SBX are additionally disabled whenever the macOS
+    Audio tab reports the Clock Source is Stereo Direct -- those controls are
+    sent over the G6's HID protocol, which Direct Mode bypasses entirely (see
+    docs/settings-reference.md), so they would do nothing right now. That gate
+    is applied once at the end, after every page has been built, so it does
+    not depend on macOS Audio happening to build before Recording/SBX do.
     """
     audio_gated: list = []
+    clock_source_gated: list = []
+    clock_source_state = {"name": None}
 
     def on_claim_changed(claimed: bool) -> None:
         for box in audio_gated:
             widgets.set_enabled(box, claimed)
 
+    def on_clock_source_changed(name: str | None) -> None:
+        clock_source_state["name"] = name
+        _apply_clock_source_gate(clock_source_gated, name)
+
     tabs = []
     for module in visible_pages():
         if module is pages.system:
             content = module.build(controller, on_claim_changed=on_claim_changed)
+        elif module is pages.macos_audio:
+            content = module.build(controller, on_clock_source_changed=on_clock_source_changed)
         else:
             content = module.build(controller)
 
@@ -75,9 +90,30 @@ def build_pages(controller: G6Controller):
         elif hasattr(content, "audio_section"):
             audio_gated.append(content.audio_section)
 
+        if module in (pages.recording, pages.sbx):
+            clock_source_gated.append(content)
+
         tabs.append((module.TITLE, content))
 
+    # macOS Audio may have built before Recording/SBX (or after, or not at
+    # all on Linux); re-apply now that clock_source_gated is fully populated.
+    _apply_clock_source_gate(clock_source_gated, clock_source_state["name"])
+
     return tabs, audio_gated
+
+
+def _apply_clock_source_gate(boxes: list, clock_source_name: str | None) -> None:
+    """Disable Recording/SBX only once positively confirmed to be pointless.
+
+    ``clock_source_name`` is ``None`` both on Linux (no macOS Audio tab exists
+    at all) and when macOS Audio could not positively identify the G6's clock
+    source -- in neither case do we actually know Stereo Direct is active, so
+    the conservative choice is to leave these tabs enabled rather than
+    speculatively disable them.
+    """
+    is_direct = clock_source_name == pages.macos_audio.coreaudio.STEREO_DIRECT
+    for box in boxes:
+        widgets.set_enabled(box, not is_direct)
 
 
 class G6App(toga.App):

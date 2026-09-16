@@ -254,6 +254,41 @@ def note_block(text: str) -> toga.Box:
     return _wrapped(text, _NOTE_STYLE)
 
 
+class _DynamicTextBlock(toga.Box):
+    """A note_block()/warning_block() whose text can change after creation.
+
+    Plain note()/warning() Labels support reassigning .text directly, but a
+    wrapped block cannot -- it is a column of separate Label lines, and the
+    number of lines a new message needs will not generally match the old one.
+    This clears and rebuilds those child labels on set_text() instead.
+    """
+
+    def __init__(self, text: str, style_pack: Pack):
+        super().__init__(style=Pack(direction=COLUMN, margin_bottom=6))
+        self._style_pack = style_pack
+        self.set_text(text)
+
+    def set_text(self, text: str) -> None:
+        for child in list(self.children):
+            self.remove(child)
+        lines = []
+        for paragraph in text.split("\n"):
+            lines.extend(textwrap.wrap(paragraph, width=HELP_WRAP_COLUMNS) or [""])
+        for line in lines:
+            self.add(toga.Label(line, style=self._style_pack))
+        self.lines = lines
+
+
+def dynamic_note_block(text: str = "") -> _DynamicTextBlock:
+    """A note_block() that can be updated later via ``.set_text(...)``."""
+    return _DynamicTextBlock(text, _NOTE_STYLE)
+
+
+def dynamic_warning_block(text: str = "") -> _DynamicTextBlock:
+    """A warning_block() that can be updated later via ``.set_text(...)``."""
+    return _DynamicTextBlock(text, _WARNING_STYLE)
+
+
 def warning_block(text: str) -> toga.Box:
     """Multi-line orange warning. Use when the text is too long for one line."""
     return _wrapped(text, _WARNING_STYLE)

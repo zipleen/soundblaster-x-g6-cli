@@ -6,6 +6,7 @@ import toga
 
 from g6_cli.g6_spec.recording import MicrophoneEqualizerPreset
 from g6_gui import convert, help as help_text, widgets
+from g6_gui.platform import IS_MACOS
 from g6_gui.controller import G6Controller
 from g6_gui.platform import AUDIO_INTERFACE_SUPPORTED
 
@@ -22,6 +23,8 @@ def build(controller: G6Controller) -> toga.Widget:
     content = widgets.page()
 
     hid_section = widgets.section("Recording")
+    if IS_MACOS:
+        hid_section.add(widgets.note_block(help_text.RECORDING_SBX_DISABLED_BY_CLOCK_SOURCE))
 
     mic_boost_row = widgets.slider_row(
         "Mic Boost",

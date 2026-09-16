@@ -325,6 +325,39 @@ LIGHTING_COLOUR = (
     "animation modes; only the fixed colour was captured by this project."
 )
 
+# ── macOS Audio (Audio MIDI Setup, controlled directly) ─────────────────────
+
+MACOS_CLOCK_SOURCE = (
+    "This is the actual Direct Mode switch on macOS -- the one on the "
+    "Playback tab does nothing here, because macOS controls this itself.\n"
+    "\n"
+    "DSP Clock keeps SBX, the equalizer and the microphone working, capped at "
+    "48 kHz. Stereo Direct is Direct Mode: bit-perfect up to 384 kHz, but SBX, "
+    "Scout Mode and the microphone all stop working.\n"
+    "\n"
+    "Switching from Stereo Direct back to DSP Clock automatically drops the "
+    "format to something DSP Clock supports first. Without that, the switch "
+    "can silently fail and leave audio broken -- confirmed by hand before "
+    "this was automated."
+)
+
+RECORDING_SBX_DISABLED_BY_CLOCK_SOURCE = (
+    "Disabled: macOS's Clock Source is set to Stereo Direct, which bypasses "
+    "the G6's entire DSP. These controls would do nothing right now. See the "
+    "macOS Audio tab."
+)
+
+MACOS_FORMAT = (
+    "The sample rate and bit depth Core Audio sends to the G6. Only the "
+    "formats the current Clock Source actually offers are listed -- DSP "
+    "Clock's list tops out at 48 kHz, Stereo Direct's goes to 384 kHz.\n"
+    "\n"
+    "Higher is not better here: 24-bit/48 kHz already covers essentially all "
+    "source material and the G6's own dynamic range. Prefer it unless you "
+    "specifically have hi-res files or need DSD, and DSD needs Windows -- "
+    "Creative say macOS does not support DSD playback at all."
+)
+
 # ── Mixer ───────────────────────────────────────────────────────────────────
 
 MIXER_SOURCE = (

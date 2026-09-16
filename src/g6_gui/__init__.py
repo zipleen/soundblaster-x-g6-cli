@@ -10,7 +10,7 @@
 #: This is pre-1.0 and says so. It moves when the GUI changes, not when upstream
 #: releases. Note this is *not* the version of the released .app/.dmg, which
 #: comes from ``version`` in pyproject.toml and also drives the release tag.
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 def main():
