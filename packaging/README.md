@@ -53,10 +53,20 @@ would have failed on any Mac without Homebrew, and nothing would have caught it.
 | `hidapi` | Nothing to do. Its wheel statically embeds libhidapi and links only system frameworks. |
 | `libusb` | Not in any wheel — `pyusb` loads it at runtime via `ctypes.util.find_library`. The build script copies it to `Contents/Resources/lib/`, and `g6_gui/native.py` points pyusb at that copy before the first device lookup. |
 
+## Continuous integration
+
+`.github/workflows/macos-release.yml` builds this on every push to `main`,
+running the GUI test suite first, uploading the `.dmg` as a workflow artifact,
+and publishing a GitHub Release when the `version` in `pyproject.toml` is one
+that has not been tagged yet. Bump that version to cut a release; pushes that
+leave it unchanged build and upload, but do not re-release.
+
+CI builds are ad-hoc signed — see below and `NOTARIZING.md`.
+
 ## Signing
 
-The build uses **ad-hoc signing** (`--adhoc-sign`): valid locally, but not
-notarised by Apple.
+The default build uses **ad-hoc signing** (`--adhoc-sign`): valid locally, but
+not notarised by Apple.
 
 - Copying the app between your own machines works.
 - If the `.dmg` is *downloaded* (browser, email, AirDrop), macOS attaches a
@@ -69,9 +79,27 @@ notarised by Apple.
 
   or right-click the app → Open → Open.
 
-To distribute without that friction you need a paid Apple Developer ID and
-notarisation; pass your identity to `briefcase package macOS app` instead of
-`--adhoc-sign`.
+To distribute without that friction, notarise the build:
+
+```bash
+packaging/notarize-macos.sh --check   # verify your setup, build nothing
+packaging/notarize-macos.sh           # full signed + notarised build
+```
+
+That needs a paid Apple Developer ID. **[NOTARIZING.md](NOTARIZING.md)** lists
+the one-time steps only you can do (certificate, app-specific password, team ID)
+and what to do when Apple rejects a submission.
+
+The build script also takes the identity directly:
+
+```bash
+packaging/build-macos.sh --identity "Developer ID Application: Your Name (TEAMID)"
+packaging/build-macos.sh --identity "..." --no-notarize   # sign, skip Apple
+```
+
+An ad-hoc signed bundle cannot be notarised after the fact — every binary has to
+be re-signed with the Developer ID and the hardened runtime enabled, so
+notarising always rebuilds.
 
 ## Licence note
 

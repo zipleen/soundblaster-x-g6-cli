@@ -10,7 +10,12 @@
 #
 set -uo pipefail
 
-APP="${1:?usage: verify-macos-app.sh <path to .app>}"
+APP="${1:?usage: verify-macos-app.sh <path to .app> [--no-runtime]}"
+# --no-runtime skips launching the app. Only for machines with no window server;
+# it drops the check that the bundled libusb is the one actually loaded, which
+# is the single most valuable check here.
+RUN_RUNTIME=1
+[[ "${2:-}" == "--no-runtime" ]] && RUN_RUNTIME=0
 FAILED=0
 
 pass() { printf '  \033[1;32mPASS\033[0m %s\n' "$*"; }
@@ -86,8 +91,13 @@ fi
 # The decisive check. Everything above can pass while the running app still
 # quietly picks up Homebrew's copy.
 head_ "Runtime behaviour"
+if [[ "$RUN_RUNTIME" -eq 0 ]]; then
+    printf '  \033[1;33mSKIP\033[0m --no-runtime given; NOT verified that the bundled libusb is loaded\n'
+fi
 BIN="$APP/Contents/MacOS/$(basename "$APP" .app)"
-if [[ ! -x "$BIN" ]]; then
+if [[ "$RUN_RUNTIME" -eq 0 ]]; then
+    :
+elif [[ ! -x "$BIN" ]]; then
     fail "no executable at $BIN"
 else
     LOG="$(mktemp)"

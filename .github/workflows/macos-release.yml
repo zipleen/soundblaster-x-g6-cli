@@ -1,0 +1,147 @@
+name: macOS app
+
+# Builds the self-contained macOS bundle and publishes a GitHub Release when
+# the version in pyproject.toml is one that has not been released yet.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: "Publish a release even if the tag already exists (re-tags)"
+        type: boolean
+        default: false
+
+# Needed to create the tag and the release.
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # arm64 runner, matching the bundle this produces. An Intel build would
+    # need universal_build = true in pyproject.toml.
+    runs-on: macos-15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags are needed to tell whether this version shipped
+
+      - name: Set up Python 3.12
+        id: setup-python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install libusb
+        # Needed only to build: the script copies it into the bundle, so the
+        # finished app does not depend on Homebrew.
+        run: brew install libusb
+
+      - name: Install the project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[gui]' pytest pytest-asyncio
+
+      - name: Run the GUI test suite
+        # Only tests/g6_gui: tests/g6_cli has pre-existing failures caused by an
+        # argparse message change in Python 3.12.14, unrelated to this app.
+        run: python -m pytest tests/g6_gui -q
+
+      - name: Build the .app and .dmg
+        env:
+          PYTHON: ${{ steps.setup-python.outputs.python-path }}
+        run: packaging/build-macos.sh
+
+      - name: Collect build outputs
+        id: outputs
+        run: |
+          set -euo pipefail
+          DMG="$(ls -t dist/*.dmg | head -1)"
+          VERSION="$(python -c '
+          import tomllib, pathlib
+          data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+          print(data["project"]["version"])
+          ')"
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+          echo "dmg=$DMG"              >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"      >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"         >> "$GITHUB_OUTPUT"
+          echo "Built $DMG for version $VERSION"
+
+      - name: Upload the build as a workflow artifact
+        # Kept regardless of whether a release is published, so every build on
+        # main is downloadable.
+        uses: actions/upload-artifact@v4
+        with:
+          name: sound-blaster-x-g6-macos-${{ steps.outputs.version }}
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
+
+      - name: Decide whether to publish a release
+        id: decide
+        env:
+          TAG: ${{ steps.outputs.tag }}
+          FORCE: ${{ inputs.force_release }}
+        run: |
+          set -euo pipefail
+          if [ "$FORCE" = "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Forced release requested for $TAG."
+          elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG already exists - not releasing again."
+            echo "Bump 'version' in pyproject.toml to publish a new release." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG is new - a release will be published."
+          fi
+
+      - name: Publish the release
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.outputs.tag }}
+          VERSION: ${{ steps.outputs.version }}
+          DMG: ${{ steps.outputs.dmg }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'NOTES'
+          Self-contained macOS application for the Sound Blaster X G6.
+
+          **Install:** open the `.dmg` and drag **Sound Blaster X G6** into
+          Applications. The bundle embeds its own Python, all dependencies and
+          `libusb`, so no Python or Homebrew install is required.
+
+          **Apple Silicon only.** This build is arm64.
+
+          **Gatekeeper:** the app is ad-hoc signed, not notarised. macOS
+          quarantines downloaded files, so on first run either right-click the
+          app and choose Open, or clear the flag:
+
+          ```
+          xattr -dr com.apple.quarantine "/Applications/Sound Blaster X G6.app"
+          ```
+
+          **macOS shows fewer controls than Linux.** Everything reached through
+          the G6's USB AudioControl interface needs the kernel audio driver
+          detached, which macOS does not permit, so those controls are hidden.
+
+          **Licence:** this application includes GPL-2.0-only code. The complete
+          corresponding source for this build is this repository at the tag
+          below.
+          NOTES
+          gh release create "$TAG" \
+            "$DMG" "$DMG.sha256" \
+            --title "Sound Blaster X G6 $VERSION" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA" \
+            --generate-notes
+          echo "Published release $TAG" >> "$GITHUB_STEP_SUMMARY"

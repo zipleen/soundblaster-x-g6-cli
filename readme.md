@@ -44,7 +44,11 @@ packaging/build-macos.sh
 Open the resulting `dist/Sound Blaster X G6-<version>.dmg`, drag the app into
 Applications, and double-click it. See [packaging/README.md](packaging/README.md)
 for build requirements, the self-containment checks, and the Gatekeeper caveat
-for downloaded copies.
+for downloaded copies. To produce a build that opens with no Gatekeeper warning,
+see [packaging/NOTARIZING.md](packaging/NOTARIZING.md).
+
+Pushes to `main` build the app in CI and publish a GitHub Release whenever the
+`version` in `pyproject.toml` has not been released yet.
 
 See [docs/gui.md](docs/gui.md) for the full guide, including the SBX
 editing-profile vs active-profile semantics.

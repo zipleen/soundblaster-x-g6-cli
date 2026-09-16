@@ -10,3 +10,4 @@ build/
 dist/
 .build-venv/
 *.dmg
+.DS_Store
