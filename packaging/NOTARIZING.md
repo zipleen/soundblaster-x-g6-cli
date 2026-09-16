@@ -133,10 +133,48 @@ key, that Mac cannot sign.
 
 ## Notarising from CI
 
-The release workflow (`.github/workflows/macos-release.yml`) builds ad-hoc,
-because notarisation needs your certificate and Apple credentials as repository
-secrets. To do it in CI you would export the `.p12`, add it plus the app-specific
-password as encrypted secrets, import it into a temporary keychain during the
-run, and pass `--identity` to `packaging/build-macos.sh`. Worth doing only if you
-cut releases often; otherwise running this script locally is simpler and keeps
-your signing key off GitHub.
+`.github/workflows/macos-release.yml` picks its build mode automatically:
+
+| `MACOS_CERTIFICATE_P12` secret | Build | `.dmg` name |
+|---|---|---|
+| set | Developer ID signed + notarised | `...-macos-arm64-notarized.dmg` |
+| not set | ad-hoc signed | `...-macos-arm64-unsigned.dmg` |
+
+The mode is in the filename, so the two can never be confused after download.
+If the certificate is set but the other secrets are missing, the run **fails**
+rather than quietly producing an unsigned build.
+
+### Secrets to add
+
+Repository → Settings → Secrets and variables → Actions → New repository secret.
+
+| Secret | Value |
+|---|---|
+| `MACOS_CERTIFICATE_P12` | your Developer ID certificate, exported as `.p12`, base64-encoded |
+| `MACOS_CERTIFICATE_PASSWORD` | the password you set when exporting the `.p12` |
+| `MACOS_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (ABCDE12345)` |
+| `APPLE_ID` | the Apple ID of your developer account |
+| `APPLE_TEAM_ID` | e.g. `ABCDE12345` |
+| `APPLE_APP_PASSWORD` | the app-specific password from step 4 |
+
+Export the certificate from **Keychain Access → My Certificates →
+right-click → Export** (this includes the private key; choose a password), then:
+
+```bash
+base64 -i Certificates.p12 | pbcopy    # paste as MACOS_CERTIFICATE_P12
+```
+
+### What the workflow does with them
+
+It imports the certificate into a temporary keychain, stores the notarytool
+credentials in that same keychain, builds with `--identity`, and **deletes the
+keychain afterwards even if the build fails** — the private key does not outlive
+the job.
+
+### Worth weighing first
+
+Putting a Developer ID private key into repository secrets means anyone who can
+run workflows (or push a workflow change) in this repository can sign code as
+you. For a personal project that cuts releases occasionally, running
+`packaging/notarize-macos.sh` locally is simpler and keeps the key on your own
+machine.

@@ -1,18 +1,23 @@
 name: macOS app
 
-# Builds the self-contained macOS bundle and publishes a GitHub Release when
-# the version in pyproject.toml is one that has not been released yet.
+# Builds the self-contained macOS bundle and publishes a GitHub Release when the
+# version in pyproject.toml has not been released yet.
+#
+# Two build modes, chosen automatically:
+#   * signing secrets present -> Developer ID signed + notarised
+#   * secrets absent          -> ad-hoc signed (Gatekeeper warns on download)
+# The .dmg is named for its mode so the two can never be confused.
+# See packaging/NOTARIZING.md for which secrets to set.
 on:
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
       force_release:
-        description: "Publish a release even if the tag already exists (re-tags)"
+        description: "Publish a release even if the tag already exists"
         type: boolean
         default: false
 
-# Needed to create the tag and the release.
 permissions:
   contents: write
 
@@ -22,8 +27,8 @@ concurrency:
 
 jobs:
   build:
-    # arm64 runner, matching the bundle this produces. An Intel build would
-    # need universal_build = true in pyproject.toml.
+    # arm64 runner, matching the bundle this produces. An Intel build would need
+    # universal_build = true in pyproject.toml.
     runs-on: macos-15
 
     steps:
@@ -39,8 +44,8 @@ jobs:
           python-version: "3.12"
 
       - name: Install libusb
-        # Needed only to build: the script copies it into the bundle, so the
-        # finished app does not depend on Homebrew.
+        # Build-time only: the script copies it into the bundle, so the finished
+        # app does not depend on Homebrew.
         run: brew install libusb
 
       - name: Install the project and test dependencies
@@ -53,33 +58,134 @@ jobs:
         # argparse message change in Python 3.12.14, unrelated to this app.
         run: python -m pytest tests/g6_gui -q
 
-      - name: Build the .app and .dmg
+      - name: Decide the build mode
+        id: mode
+        # Secrets cannot be used directly in an `if:`, so resolve the mode here
+        # and let later steps branch on this output.
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CERT_P12" ]; then
+            echo "mode=unsigned" >> "$GITHUB_OUTPUT"
+            echo "No signing certificate configured - building an ad-hoc signed bundle."
+            echo "Built **unsigned** (ad-hoc). Set the signing secrets to get a notarised build - see packaging/NOTARIZING.md." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # A certificate without the rest of the credentials cannot notarise.
+          # Fail loudly rather than silently shipping an unsigned build that
+          # looks like it should have been notarised.
+          MISSING=""
+          [ -z "$CERT_PASSWORD" ]      && MISSING="$MISSING MACOS_CERTIFICATE_PASSWORD"
+          [ -z "$SIGNING_IDENTITY" ]   && MISSING="$MISSING MACOS_SIGNING_IDENTITY"
+          [ -z "$APPLE_ID" ]           && MISSING="$MISSING APPLE_ID"
+          [ -z "$APPLE_TEAM_ID" ]      && MISSING="$MISSING APPLE_TEAM_ID"
+          [ -z "$APPLE_APP_PASSWORD" ] && MISSING="$MISSING APPLE_APP_PASSWORD"
+          if [ -n "$MISSING" ]; then
+            echo "::error::A signing certificate is configured, but these secrets are missing:$MISSING"
+            echo "::error::Set them, or remove MACOS_CERTIFICATE_P12 to build unsigned on purpose."
+            exit 1
+          fi
+
+          echo "mode=notarized" >> "$GITHUB_OUTPUT"
+          echo "Signing certificate found - building a notarised bundle."
+
+      - name: Import the signing certificate
+        if: steps.mode.outputs.mode == 'notarized'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          # A dedicated keychain, added to the search list so codesign and
+          # notarytool can both find what they need. Deleted again below.
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          printf '%s' "$CERT_P12" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+              -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$CERT_PATH"
+
+          # Without this, codesign blocks on a UI prompt that no one can answer.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+              -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain
+
+          echo "Identities available to codesign:"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+          # briefcase looks for a notarytool profile named after the team.
+          xcrun notarytool store-credentials "briefcase-macOS-$APPLE_TEAM_ID" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" \
+              --keychain "$KEYCHAIN"
+
+          echo "SIGNING_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Build the .app and .dmg (notarised)
+        if: steps.mode.outputs.mode == 'notarized'
+        env:
+          PYTHON: ${{ steps.setup-python.outputs.python-path }}
+          IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: packaging/build-macos.sh --identity "$IDENTITY"
+
+      - name: Build the .app and .dmg (unsigned)
+        if: steps.mode.outputs.mode == 'unsigned'
         env:
           PYTHON: ${{ steps.setup-python.outputs.python-path }}
         run: packaging/build-macos.sh
 
-      - name: Collect build outputs
+      - name: Remove the signing keychain
+        # always(): the key must not outlive the job even if the build failed.
+        if: always() && env.SIGNING_KEYCHAIN != ''
+        run: security delete-keychain "$SIGNING_KEYCHAIN" || true
+
+      - name: Name and checksum the build
         id: outputs
+        env:
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
-          DMG="$(ls -t dist/*.dmg | head -1)"
+          BUILT="$(ls -t dist/*.dmg | head -1)"
           VERSION="$(python -c '
           import tomllib, pathlib
           data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
           print(data["project"]["version"])
           ')"
+          # The mode is in the filename so a notarised and an unsigned build can
+          # never be mistaken for each other once downloaded.
+          DMG="dist/Sound-Blaster-X-G6-${VERSION}-macos-arm64-${MODE}.dmg"
+          [ "$BUILT" = "$DMG" ] || mv "$BUILT" "$DMG"
           shasum -a 256 "$DMG" > "$DMG.sha256"
-          echo "dmg=$DMG"              >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION"      >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION"         >> "$GITHUB_OUTPUT"
-          echo "Built $DMG for version $VERSION"
+
+          echo "dmg=$DMG"         >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"    >> "$GITHUB_OUTPUT"
+          echo "Built $DMG"
+          echo "Built \`$(basename "$DMG")\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the build as a workflow artifact
-        # Kept regardless of whether a release is published, so every build on
-        # main is downloadable.
+        # Kept whether or not a release is published, so every build on main is
+        # downloadable.
         uses: actions/upload-artifact@v4
         with:
-          name: sound-blaster-x-g6-macos-${{ steps.outputs.version }}
+          name: sound-blaster-x-g6-macos-${{ steps.outputs.version }}-${{ steps.mode.outputs.mode }}
           path: |
             dist/*.dmg
             dist/*.dmg.sha256
@@ -98,7 +204,7 @@ jobs:
           elif git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "Tag $TAG already exists - not releasing again."
-            echo "Bump 'version' in pyproject.toml to publish a new release." >> "$GITHUB_STEP_SUMMARY"
+            echo "No release: \`$TAG\` already exists. Bump \`version\` in pyproject.toml." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "Tag $TAG is new - a release will be published."
@@ -111,37 +217,42 @@ jobs:
           TAG: ${{ steps.outputs.tag }}
           VERSION: ${{ steps.outputs.version }}
           DMG: ${{ steps.outputs.dmg }}
+          MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
-          cat > notes.md <<'NOTES'
-          Self-contained macOS application for the Sound Blaster X G6.
+          {
+            echo "Self-contained macOS application for the Sound Blaster X G6."
+            echo
+            echo "**Install:** open the \`.dmg\` and drag **Sound Blaster X G6** into"
+            echo "Applications. The bundle embeds its own Python, all dependencies and"
+            echo "\`libusb\`, so no Python or Homebrew install is required."
+            echo
+            echo "**Apple Silicon only.** This build is arm64."
+            echo
+            if [ "$MODE" = "notarized" ]; then
+              echo "**Signed and notarised by Apple.** It opens with no Gatekeeper warning."
+            else
+              echo "**Unsigned build** (ad-hoc signed, not notarised by Apple). macOS"
+              echo "quarantines downloaded files, so on first run either right-click the"
+              echo "app and choose Open, or clear the flag:"
+              echo
+              echo '```'
+              echo 'xattr -dr com.apple.quarantine "/Applications/Sound Blaster X G6.app"'
+              echo '```'
+            fi
+            echo
+            echo "**macOS shows fewer controls than Linux.** Everything reached through the"
+            echo "G6's USB AudioControl interface needs the kernel audio driver detached,"
+            echo "which macOS does not permit, so those controls are hidden."
+            echo
+            echo "**Licence:** this application includes GPL-2.0-only code. The complete"
+            echo "corresponding source for this build is this repository at tag \`$TAG\`."
+          } > notes.md
 
-          **Install:** open the `.dmg` and drag **Sound Blaster X G6** into
-          Applications. The bundle embeds its own Python, all dependencies and
-          `libusb`, so no Python or Homebrew install is required.
-
-          **Apple Silicon only.** This build is arm64.
-
-          **Gatekeeper:** the app is ad-hoc signed, not notarised. macOS
-          quarantines downloaded files, so on first run either right-click the
-          app and choose Open, or clear the flag:
-
-          ```
-          xattr -dr com.apple.quarantine "/Applications/Sound Blaster X G6.app"
-          ```
-
-          **macOS shows fewer controls than Linux.** Everything reached through
-          the G6's USB AudioControl interface needs the kernel audio driver
-          detached, which macOS does not permit, so those controls are hidden.
-
-          **Licence:** this application includes GPL-2.0-only code. The complete
-          corresponding source for this build is this repository at the tag
-          below.
-          NOTES
           gh release create "$TAG" \
             "$DMG" "$DMG.sha256" \
             --title "Sound Blaster X G6 $VERSION" \
             --notes-file notes.md \
             --target "$GITHUB_SHA" \
             --generate-notes
-          echo "Published release $TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published release $TAG ($MODE)" >> "$GITHUB_STEP_SUMMARY"

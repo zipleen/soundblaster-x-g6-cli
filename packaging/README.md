@@ -61,7 +61,10 @@ and publishing a GitHub Release when the `version` in `pyproject.toml` is one
 that has not been tagged yet. Bump that version to cut a release; pushes that
 leave it unchanged build and upload, but do not re-release.
 
-CI builds are ad-hoc signed — see below and `NOTARIZING.md`.
+CI picks its build mode from whether the signing secrets are configured:
+a notarised `...-notarized.dmg` when they are, an ad-hoc `...-unsigned.dmg`
+when they are not. The mode is in the filename so the two cannot be confused.
+See [NOTARIZING.md](NOTARIZING.md) for the secrets.
 
 ## Signing
 
