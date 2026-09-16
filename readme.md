@@ -32,6 +32,14 @@ The GUI is built with Toga (BSD-3-Clause), which is compatible with this
 project's GPL-2.0-only licence; Qt bindings are not, and were deliberately
 avoided.
 
+Running the CLI on macOS from the terminal instead? See
+[docs/macos-cli.md](docs/macos-cli.md) — the `Cython`/`CFLAGS` steps in older
+instructions are no longer needed.
+
+How settings are stored, and why `~/.soundblaster-x-g6/g6.json` is a record
+rather than a configuration file, is explained in
+[docs/device-state.md](docs/device-state.md).
+
 ### Standalone macOS app
 
 To build a self-contained `.app` and `.dmg` that need neither Python nor

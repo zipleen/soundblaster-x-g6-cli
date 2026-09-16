@@ -75,6 +75,20 @@ audio interface* in the System tab. Be aware of what claiming does: it detaches
 the kernel driver, so **your system has no audio output until you release it
 again**. The GUI releases the interface automatically when you quit.
 
+## Where your settings actually live
+
+In the G6 itself, not in a file. Nothing is applied when the app starts, and
+`~/.soundblaster-x-g6/g6.json` is a record of what was last sent — which is why
+the GUI presents those values as last known state rather than claiming to have
+read the device. The device cannot be read back at all.
+
+That also means the displayed values can drift from reality if the settings were
+changed elsewhere (another machine, another OS, Creative's own software). If the
+UI disagrees with what you hear, the device is right.
+
+Full detail, including why this is how it works:
+[device-state.md](device-state.md).
+
 ## SBX: editing profile vs active profile
 
 This is the one part of the device that behaves counter-intuitively, so the GUI
