@@ -71,7 +71,22 @@ if [[ -z "$IDENTITY" ]]; then
         die "Several Developer ID certificates found. Choose one with:
        packaging/notarize-macos.sh --identity \"Developer ID Application: Name (TEAMID)\""
     fi
-    IDENTITY="$(echo "$IDENTITIES" | sed -E 's/.*\) "(.*)"$/\1/')"
+    # Anchored to the known "  N) HASH "..."" structure of a find-identity
+    # line, not a greedy backward match from the end -- the certificate name
+    # itself always ends in "(TEAMID)", and a trailing-anchored `.*\) "(.*)"$`
+    # greedily consumes through *that* parenthesis instead of the one after
+    # the index number, so the substitution silently fails to match and the
+    # whole raw line (index, hash and all) is passed through unchanged as the
+    # "identity" -- which is exactly the "Invalid ... signing identity"
+    # briefcase error this caused. Reproduced and confirmed before fixing.
+    IDENTITY="$(echo "$IDENTITIES" | sed -E 's/^[[:space:]]*[0-9]+\)[[:space:]]+[0-9A-Fa-f]+[[:space:]]+"(.*)"$/\1/')"
+    # Fail loudly rather than silently handing briefcase a raw, unparsed
+    # find-identity line -- exactly the failure mode above, if `security`
+    # ever changes its output format again.
+    [[ "$IDENTITY" == "Developer ID Application:"* ]] \
+        || die "Could not parse a signing identity out of:
+       $IDENTITIES
+       Pass it explicitly instead: packaging/notarize-macos.sh --identity \"Developer ID Application: Name (TEAMID)\""
 fi
 ok "signing identity: $IDENTITY"
 
