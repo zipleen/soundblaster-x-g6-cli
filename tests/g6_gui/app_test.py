@@ -166,3 +166,86 @@ def test_switching_to_stereo_direct_live_disables_recording_and_sbx(monkeypatch)
     assert by_title["Recording"].mic_boost.slider.enabled is False
     assert by_title["SBX"].surround.toggle.switch.enabled is False
     controller.shutdown()
+
+
+def test_disabled_note_is_empty_when_dsp_clock_is_active(monkeypatch):
+    """Regression: the note used to say "Disabled: ..." unconditionally on
+    macOS, regardless of the actual clock source -- reported as a bug after
+    shipping. It must be empty (and so take no visible space) whenever the
+    controls are not actually disabled."""
+    from g6_gui import coreaudio as ca
+    from g6_gui.controller import G6Controller
+    from g6_gui.pages import macos_audio
+    from tests.g6_gui.fake_coreaudio import FakeHal
+
+    hal = FakeHal(current_clock_source_code=0)  # DSP Clock
+    monkeypatch.setattr(macos_audio, "_make_clock_controller", lambda: ca.ClockController(hal=hal))
+
+    controller = G6Controller(FakeG6Api())
+    tabs, _ = app_module.build_pages(controller)
+    by_title = dict(tabs)
+
+    assert by_title["Recording"].clock_source_note.lines == []
+    assert by_title["SBX"].clock_source_note.lines == []
+    controller.shutdown()
+
+
+def test_disabled_note_appears_only_once_stereo_direct_is_confirmed(monkeypatch):
+    from g6_gui import coreaudio as ca
+    from g6_gui.controller import G6Controller
+    from g6_gui.pages import macos_audio
+    from tests.g6_gui.fake_coreaudio import FakeHal
+
+    hal = FakeHal(current_clock_source_code=1)  # Stereo Direct
+    monkeypatch.setattr(macos_audio, "_make_clock_controller", lambda: ca.ClockController(hal=hal))
+
+    controller = G6Controller(FakeG6Api())
+    tabs, _ = app_module.build_pages(controller)
+    by_title = dict(tabs)
+
+    rec_text = " ".join(by_title["Recording"].clock_source_note.lines)
+    sbx_text = " ".join(by_title["SBX"].clock_source_note.lines)
+    assert "Disabled" in rec_text and "Stereo Direct" in rec_text
+    assert "Disabled" in sbx_text and "Stereo Direct" in sbx_text
+    controller.shutdown()
+
+
+def test_disabled_note_stays_empty_when_clock_source_is_unrecognised(monkeypatch):
+    """Same conservative default as the enabled/disabled gate itself: an
+    ambiguous read must not speculatively claim the controls are disabled."""
+    from g6_gui import coreaudio as ca
+    from g6_gui.controller import G6Controller
+    from g6_gui.pages import macos_audio
+    from tests.g6_gui.fake_coreaudio import FakeHal
+
+    hal = FakeHal(clock_sources=[ca.ClockSource(0, "Internal"), ca.ClockSource(1, "External")])
+    monkeypatch.setattr(macos_audio, "_make_clock_controller", lambda: ca.ClockController(hal=hal))
+
+    controller = G6Controller(FakeG6Api())
+    tabs, _ = app_module.build_pages(controller)
+    by_title = dict(tabs)
+
+    assert by_title["Recording"].clock_source_note.lines == []
+    assert by_title["SBX"].clock_source_note.lines == []
+    controller.shutdown()
+
+
+def test_disabled_note_updates_live_when_switching_to_stereo_direct(monkeypatch):
+    from g6_gui import coreaudio as ca
+    from g6_gui.controller import G6Controller
+    from g6_gui.pages import macos_audio
+    from tests.g6_gui.fake_coreaudio import FakeHal
+
+    hal = FakeHal(current_clock_source_code=0)
+    monkeypatch.setattr(macos_audio, "_make_clock_controller", lambda: ca.ClockController(hal=hal))
+
+    controller = G6Controller(FakeG6Api())
+    tabs, _ = app_module.build_pages(controller)
+    by_title = dict(tabs)
+    assert by_title["Recording"].clock_source_note.lines == []
+
+    by_title["macOS Audio"].clock_source.selection.value = "Stereo Direct"
+
+    assert by_title["Recording"].clock_source_note.lines != []
+    assert by_title["SBX"].clock_source_note.lines != []
+    controller.shutdown()

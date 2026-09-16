@@ -271,6 +271,14 @@ class _DynamicTextBlock(toga.Box):
     def set_text(self, text: str) -> None:
         for child in list(self.children):
             self.remove(child)
+        if not text.strip():
+            # No residual blank-line gap when there is nothing to say --
+            # matters here specifically because this block is used for
+            # conditional notes (e.g. "disabled because ...") that must be
+            # able to disappear entirely, not just show an empty line, when
+            # the condition they describe is not currently true.
+            self.lines = []
+            return
         lines = []
         for paragraph in text.split("\n"):
             lines.extend(textwrap.wrap(paragraph, width=HELP_WRAP_COLUMNS) or [""])

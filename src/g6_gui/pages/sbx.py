@@ -121,8 +121,13 @@ def build(controller: G6Controller) -> toga.Widget:
 
     content = widgets.page()
 
+    clock_source_note = None
     if IS_MACOS:
-        content.add(widgets.note_block(help_text.RECORDING_SBX_DISABLED_BY_CLOCK_SOURCE))
+        # Empty by default -- see the matching comment in recording.py for
+        # why this must be dynamic rather than an unconditional "Disabled:"
+        # message.
+        clock_source_note = widgets.dynamic_warning_block("")
+        content.add(clock_source_note)
 
     banner = widgets.note(_banner_text(state["editing"], active_profile))
 
@@ -281,5 +286,7 @@ def build(controller: G6Controller) -> toga.Widget:
     content.banner = banner
     content.switch_button = switch_button
     content.smart_volume_special = smart_volume_special
+    if clock_source_note is not None:
+        content.clock_source_note = clock_source_note
 
     return content

@@ -14,7 +14,7 @@ name = "soundblaster-x-g6-cli"
 # git tag the release workflow creates (v<version>). In this fork it tracks the
 # GUI, not upstream's CLI -- keep it in step with g6_gui/__init__.py's VERSION.
 # src/g6_cli/__init__.py is upstream's and is deliberately left alone.
-version = "0.2.0"
+version = "0.2.1"
 #
 dependencies = [
     "hidapi==0.15.0",
@@ -95,7 +95,7 @@ asyncio_mode = "auto"
 project_name = "Sound Blaster X G6"
 bundle = "dev.g6cli"
 # Keep in step with [project].version above.
-version = "0.2.0"
+version = "0.2.1"
 author = "Nils Skowasch"
 author_email = "nils_s89_dev@gmx.de"
 url = "https://github.com/nils-skowasch/soundblaster-x-g6-cli"

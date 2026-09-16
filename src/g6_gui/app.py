@@ -10,7 +10,7 @@ from toga.style.pack import COLUMN, ROW, Pack
 
 from g6_cli.g6_api import G6Api
 
-from g6_gui import VERSION, native, pages, widgets
+from g6_gui import VERSION, help as help_text, native, pages, widgets
 from g6_gui.controller import G6Controller
 
 WINDOW_SIZE = (860, 620)
@@ -110,10 +110,19 @@ def _apply_clock_source_gate(boxes: list, clock_source_name: str | None) -> None
     source -- in neither case do we actually know Stereo Direct is active, so
     the conservative choice is to leave these tabs enabled rather than
     speculatively disable them.
+
+    Also updates each box's ``clock_source_note`` (a dynamic_warning_block,
+    where present) to match. It must say "Disabled" only when the controls
+    genuinely are disabled, not unconditionally on macOS regardless of the
+    actual clock source -- that was a real bug, reported after the first
+    version of this shipped.
     """
     is_direct = clock_source_name == pages.macos_audio.coreaudio.STEREO_DIRECT
     for box in boxes:
         widgets.set_enabled(box, not is_direct)
+        note = getattr(box, "clock_source_note", None)
+        if note is not None:
+            note.set_text(help_text.RECORDING_SBX_DISABLED_BY_CLOCK_SOURCE if is_direct else "")
 
 
 class G6App(toga.App):

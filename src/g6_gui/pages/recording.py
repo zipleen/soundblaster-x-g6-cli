@@ -23,8 +23,16 @@ def build(controller: G6Controller) -> toga.Widget:
     content = widgets.page()
 
     hid_section = widgets.section("Recording")
+    clock_source_note = None
     if IS_MACOS:
-        hid_section.add(widgets.note_block(help_text.RECORDING_SBX_DISABLED_BY_CLOCK_SOURCE))
+        # Empty by default -- text (and visible space) only appears once
+        # app.py's cross-tab gate positively confirms Stereo Direct is
+        # active. It used to say "Disabled: ..." unconditionally regardless
+        # of the actual clock source, which was simply wrong whenever DSP
+        # Clock was selected. See coreaudio.STEREO_DIRECT / app.py's
+        # _apply_clock_source_gate, which calls .set_text() on this.
+        clock_source_note = widgets.dynamic_warning_block("")
+        hid_section.add(clock_source_note)
 
     mic_boost_row = widgets.slider_row(
         "Mic Boost",
@@ -41,6 +49,8 @@ def build(controller: G6Controller) -> toga.Widget:
 
     content.add(hid_section)
     content.mic_boost = mic_boost_row
+    if clock_source_note is not None:
+        content.clock_source_note = clock_source_note
 
     voice_clarity_section = _build_voice_clarity_section(controller, recording_model)
     content.add(voice_clarity_section)
