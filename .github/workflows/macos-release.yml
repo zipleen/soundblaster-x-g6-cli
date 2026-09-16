@@ -161,7 +161,7 @@ jobs:
         run: security delete-keychain "$SIGNING_KEYCHAIN" || true
 
       - name: Name and checksum the build
-        id: outputs
+        id: build_info
         env:
           MODE: ${{ steps.mode.outputs.mode }}
         run: |
@@ -189,7 +189,7 @@ jobs:
         # downloadable.
         uses: actions/upload-artifact@v4
         with:
-          name: sound-blaster-x-g6-macos-${{ steps.outputs.version }}-${{ steps.mode.outputs.mode }}
+          name: sound-blaster-x-g6-macos-${{ steps.build_info.outputs.version }}-${{ steps.mode.outputs.mode }}
           path: |
             dist/*.dmg
             dist/*.dmg.sha256
@@ -198,10 +198,14 @@ jobs:
       - name: Decide whether to publish a release
         id: decide
         env:
-          TAG: ${{ steps.outputs.tag }}
+          TAG: ${{ steps.build_info.outputs.tag }}
           FORCE: ${{ inputs.force_release }}
         run: |
           set -euo pipefail
+          if [ -z "$TAG" ]; then
+            echo "::error::TAG is empty - the build_info step did not produce its outputs."
+            exit 1
+          fi
           if [ "$FORCE" = "true" ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "Forced release requested for $TAG."
@@ -218,12 +222,17 @@ jobs:
         if: steps.decide.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.outputs.tag }}
-          VERSION: ${{ steps.outputs.version }}
-          DMG: ${{ steps.outputs.dmg }}
+          TAG: ${{ steps.build_info.outputs.tag }}
+          VERSION: ${{ steps.build_info.outputs.version }}
+          DMG: ${{ steps.build_info.outputs.dmg }}
           MODE: ${{ steps.mode.outputs.mode }}
         run: |
           set -euo pipefail
+          if [ -z "$TAG" ] || [ -z "$VERSION" ] || [ -z "$DMG" ]; then
+            echo "::error::Missing release inputs (tag='$TAG' version='$VERSION' dmg='$DMG')."
+            exit 1
+          fi
+          [ -f "$DMG" ] || { echo "::error::$DMG does not exist."; exit 1; }
           {
             echo "Self-contained macOS application for the Sound Blaster X G6."
             echo
