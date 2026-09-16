@@ -63,3 +63,66 @@ def test_set_enabled_descends_through_a_scroll_container():
 
     widgets.set_enabled(content, True)
     assert row.slider.enabled is True
+
+
+# ── (i) help blocks ─────────────────────────────────────────────────────────
+
+
+def test_row_without_help_has_no_info_button():
+    row = widgets.switch_row("Direct Mode", value=False, on_change=lambda w: None)
+    assert not hasattr(row, "info_button")
+    assert row.switch.text == "Direct Mode"
+
+
+def test_help_block_wraps_long_text_into_labels():
+    block = widgets.help_block("word " * 80)
+    assert len(block.lines) > 1
+    assert all(len(line) <= widgets.HELP_WRAP_COLUMNS for line in block.lines)
+
+
+def test_help_block_preserves_blank_lines_between_paragraphs():
+    block = widgets.help_block("first\n\nsecond")
+    assert block.lines == ["first", "", "second"]
+
+
+def test_info_button_toggles_help_in_and_out_of_the_tree():
+    row = widgets.switch_row(
+        "Direct Mode", value=False, on_change=lambda w: None, help="Explanation."
+    )
+    # Collapsed: the help block takes no space in the tree at all.
+    assert row.help not in row.children
+    assert row.info_button.text == widgets.INFO_GLYPH
+
+    row.info_button.on_press()
+    assert row.help in row.children
+    assert row.info_button.text == widgets.CLOSE_GLYPH
+
+    row.info_button.on_press()
+    assert row.help not in row.children
+    assert row.info_button.text == widgets.INFO_GLYPH
+
+
+def test_help_wrapper_still_exposes_the_live_widget():
+    switch = widgets.switch_row("A", value=True, on_change=lambda w: None, help="h")
+    assert switch.switch.value is True
+
+    slider = widgets.slider_row(
+        "B", min=0, max=100, value=40, step=10, on_change=lambda w: None, help="h"
+    )
+    assert slider.slider.value == 40
+    assert slider.readout.text == "40"
+
+    select = widgets.select_row(
+        "C", items=["A", "B"], value="B", on_change=lambda w: None, help="h"
+    )
+    assert select.selection.value == "B"
+
+
+def test_set_enabled_reaches_controls_behind_a_help_wrapper():
+    row = widgets.slider_row(
+        "B", min=0, max=100, value=40, on_change=lambda w: None, help="h"
+    )
+    widgets.set_enabled(row, False)
+    assert row.slider.enabled is False
+    widgets.set_enabled(row, True)
+    assert row.slider.enabled is True

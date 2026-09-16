@@ -7,13 +7,24 @@ so callers — and tests — can read and write ``.value`` directly.
 
 from __future__ import annotations
 
+import textwrap
+
 import toga
 from toga.style.pack import CENTER, COLUMN, ROW, Pack
 
 LABEL_WIDTH = 160
 
+#: Toga labels do not wrap, so help text is pre-wrapped into one label per line.
+HELP_WRAP_COLUMNS = 92
+
 _NOTE_STYLE = Pack(color="#888888", font_size=11)
 _WARNING_STYLE = Pack(color="#B25000", font_size=11)
+# No explicit colour: inheriting the system label colour is the only thing that
+# stays readable in both macOS light and dark appearance. A fixed grey that looks
+# "muted" on white is nearly invisible on a dark background. Help text is
+# distinguished by its smaller size and indentation instead.
+_HELP_STYLE = Pack(font_size=11)
+_INFO_BUTTON_STYLE = Pack(width=28, margin_left=4)
 
 
 class _Page(toga.Box):
@@ -54,12 +65,91 @@ def section(title: str) -> toga.Box:
     return box
 
 
-def switch_row(label: str, *, value: bool, on_change) -> toga.Box:
-    row = toga.Box(style=Pack(direction=ROW, margin_bottom=5))
+def help_block(text: str) -> toga.Box:
+    """A column of pre-wrapped labels rendering ``text``.
+
+    Toga's Label does not wrap, so paragraphs are wrapped here and emitted one
+    label per line. Blank lines in ``text`` become blank labels.
+    """
+    box = toga.Box(
+        style=Pack(direction=COLUMN, margin_left=12, margin_bottom=8, margin_top=2)
+    )
+    lines: list[str] = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            lines.append("")
+            continue
+        lines.extend(textwrap.wrap(paragraph, width=HELP_WRAP_COLUMNS) or [""])
+    for line in lines:
+        box.add(toga.Label(line, style=_HELP_STYLE))
+    box.lines = lines
+    return box
+
+
+def help_for(container: toga.Box, *, anchor: toga.Box, text: str) -> toga.Button:
+    """Add an (i) button to ``anchor`` that expands ``text`` at the end of ``container``.
+
+    For multi-row controls (an SBX effect is a switch *and* a slider) the button
+    belongs beside the label, but the help text belongs below the whole group —
+    otherwise the explanation wedges itself between a switch and its slider.
+
+    Returns the button; the help block is attached to ``container.help``.
+    """
+    block = help_block(text)
+    state = {"shown": False}
+
+    def toggle(widget, **_kwargs):
+        if state["shown"]:
+            container.remove(block)
+            widget.text = INFO_GLYPH
+        else:
+            container.add(block)
+            widget.text = CLOSE_GLYPH
+        state["shown"] = not state["shown"]
+
+    button = toga.Button(INFO_GLYPH, on_press=toggle, style=_INFO_BUTTON_STYLE)
+    button.always_enabled = True
+    anchor.add(button)
+    container.info_button = button
+    container.help = block
+    container.help_shown = lambda: state["shown"]
+    return button
+
+
+def with_help(row: toga.Box, help_text: str | None) -> toga.Box:
+    """Wrap ``row`` in a column carrying a toggleable (i) help block.
+
+    Returns a column box whose first child is ``row``. Every attribute the row
+    carried (``.switch``, ``.slider``, ...) is copied onto the returned box, so
+    callers and tests keep using the same names either way.
+
+    The help block is added and removed rather than merely hidden, so it takes
+    no layout space while collapsed.
+    """
+    if not help_text:
+        return row
+
+    container = toga.Box(style=Pack(direction=COLUMN))
+    container.add(row)
+    help_for(container, anchor=row, text=help_text)
+
+    for attr in ("switch", "slider", "readout", "selection", "buttons"):
+        if hasattr(row, attr):
+            setattr(container, attr, getattr(row, attr))
+    container.control_row = row
+    return container
+
+
+INFO_GLYPH = "ⓘ"    # ⓘ
+CLOSE_GLYPH = "✕"   # ✕
+
+
+def switch_row(label: str, *, value: bool, on_change, help: str | None = None) -> toga.Box:
+    row = toga.Box(style=Pack(direction=ROW, margin_bottom=5, align_items=CENTER))
     switch = toga.Switch(label, value=value, on_change=on_change)
     row.add(switch)
     row.switch = switch
-    return row
+    return with_help(row, help)
 
 
 def _snap(raw: float, lo: int, hi: int, step: int):
@@ -72,7 +162,14 @@ def _snap(raw: float, lo: int, hi: int, step: int):
 
 
 def slider_row(
-    label: str, *, min: int, max: int, value: int, step: int = 1, on_change
+    label: str,
+    *,
+    min: int,
+    max: int,
+    value: int,
+    step: int = 1,
+    on_change,
+    help: str | None = None,
 ) -> toga.Box:
     lo, hi = min, max
     row = toga.Box(style=Pack(direction=ROW, margin_bottom=5, align_items=CENTER, gap=8))
@@ -105,36 +202,61 @@ def slider_row(
     row.add(readout)
     row.slider = slider
     row.readout = readout
-    return row
+    return with_help(row, help)
 
 
-def select_row(label: str, *, items: list[str], value: str | None, on_change) -> toga.Box:
+def select_row(
+    label: str, *, items: list[str], value: str | None, on_change, help: str | None = None
+) -> toga.Box:
     row = toga.Box(style=Pack(direction=ROW, margin_bottom=5, align_items=CENTER, gap=8))
     caption = toga.Label(label, style=Pack(width=LABEL_WIDTH))
     selection = toga.Selection(items=items, value=value, on_change=on_change)
     row.add(caption)
     row.add(selection)
     row.selection = selection
-    return row
+    return with_help(row, help)
 
 
-def button_row(*buttons: tuple[str, object]) -> toga.Box:
-    row = toga.Box(style=Pack(direction=ROW, margin_bottom=5))
+def button_row(*buttons: tuple[str, object], help: str | None = None) -> toga.Box:
+    row = toga.Box(style=Pack(direction=ROW, margin_bottom=5, align_items=CENTER))
     created = []
     for text, handler in buttons:
         button = toga.Button(text, on_press=handler)
         row.add(button)
         created.append(button)
     row.buttons = created
-    return row
+    return with_help(row, help)
 
 
 def note(text: str) -> toga.Label:
+    """A single-line grey label. Its ``.text`` can be reassigned later."""
     return toga.Label(text, style=_NOTE_STYLE)
 
 
 def warning(text: str) -> toga.Label:
+    """A single-line orange label. Its ``.text`` can be reassigned later."""
     return toga.Label(text, style=_WARNING_STYLE)
+
+
+def _wrapped(text: str, style: Pack) -> toga.Box:
+    box = toga.Box(style=Pack(direction=COLUMN, margin_bottom=6))
+    lines = []
+    for paragraph in text.split("\n"):
+        lines.extend(textwrap.wrap(paragraph, width=HELP_WRAP_COLUMNS) or [""])
+    for line in lines:
+        box.add(toga.Label(line, style=style))
+    box.lines = lines
+    return box
+
+
+def note_block(text: str) -> toga.Box:
+    """Multi-line grey note. Use when the text is too long for one line."""
+    return _wrapped(text, _NOTE_STYLE)
+
+
+def warning_block(text: str) -> toga.Box:
+    """Multi-line orange warning. Use when the text is too long for one line."""
+    return _wrapped(text, _WARNING_STYLE)
 
 
 def set_enabled(box: toga.Widget, enabled: bool) -> None:
@@ -144,14 +266,18 @@ def set_enabled(box: toga.Widget, enabled: bool) -> None:
     matters: ``page()`` wraps its rows in a ``ScrollContainer``, whose
     ``children`` is always empty because it holds a single ``content`` widget
     instead. Without that branch, disabling a whole page silently does nothing.
+
+    Widgets carrying ``always_enabled`` are skipped. That is how the (i) help
+    buttons survive their row being disabled, which is precisely when their
+    explanation is most wanted.
     """
     for child in getattr(box, "children", None) or []:
-        if hasattr(child, "enabled"):
+        if hasattr(child, "enabled") and not getattr(child, "always_enabled", False):
             child.enabled = enabled
         set_enabled(child, enabled)
 
     content = getattr(box, "content", None)
     if isinstance(content, toga.Widget):
-        if hasattr(content, "enabled"):
+        if hasattr(content, "enabled") and not getattr(content, "always_enabled", False):
             content.enabled = enabled
         set_enabled(content, enabled)

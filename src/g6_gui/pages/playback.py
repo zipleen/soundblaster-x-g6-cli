@@ -4,13 +4,35 @@ from __future__ import annotations
 
 import toga
 
-from g6_gui import convert, widgets
+from g6_gui import convert, help as help_text, widgets
 from g6_gui.controller import G6Controller
-from g6_gui.platform import AUDIO_INTERFACE_SUPPORTED
+from g6_gui.platform import (
+    AUDIO_INTERFACE_SUPPORTED,
+    DIRECT_MODE_SUPPORTED,
+    IS_MACOS,
+    open_audio_midi_setup,
+)
 
 TITLE = "Playback"
 
 _OUTPUT_LABELS = ["Speakers", "Headphones"]
+
+_DIRECT_MODE_UNSUPPORTED = (
+    "Direct Mode is set by macOS, not by the device, so the switch above does "
+    "nothing. Use Audio MIDI Setup \u2192 Clock Source: \u201cStereo Direct\u201d is "
+    "Direct Mode, \u201cDSP Clock\u201d keeps SBX and the other effects.\n"
+    "SPDIF-Out Direct is left enabled because macOS has no equivalent setting "
+    "for it \u2014 whether it works here is untested."
+)
+
+_DECODER_NOTE = (
+    "Only affects a Dolby Digital bitstream arriving at the optical input. "
+    "It does nothing for PCM over USB."
+)
+
+
+def _on_open_audio_midi_setup(widget, **_kwargs) -> None:
+    open_audio_midi_setup()
 
 
 def is_available() -> bool:
@@ -30,30 +52,69 @@ def build(controller: G6Controller) -> toga.Widget:
         items=_OUTPUT_LABELS,
         value="Speakers" if playback_model.get_is_speakers() else "Headphones",
         on_change=_make_output_handler(controller),
+        help=help_text.OUTPUT,
     )
     hid_section.add(output_row)
+
+    # Direct Mode and SPDIF-Out Direct are two positions of one three-way Output
+    # Mode setting on the device (Audio Effects / Direct / SPDIF-Out Direct), so
+    # enabling either one disables the other. This guard keeps the mirrored
+    # switch from firing its own handler and sending a redundant packet.
+    exclusive = {"suppress": False}
+
+    def make_mode_handler(method: str, other_row_name: str):
+        def on_change(widget):
+            if exclusive["suppress"]:
+                return
+            if widget.value:
+                other = getattr(content, other_row_name, None)
+                if other is not None and other.switch.value:
+                    exclusive["suppress"] = True
+                    try:
+                        other.switch.value = False
+                    finally:
+                        exclusive["suppress"] = False
+            controller.submit(
+                method,
+                enable=widget.value,
+                revert=lambda: setattr(widget, "value", not widget.value),
+            )
+
+        return on_change
 
     direct_mode_row = widgets.switch_row(
         "Direct Mode",
         value=playback_model.get_direct_mode_enabled(),
-        on_change=lambda widget: controller.submit(
-            "playback_enable_direct_mode",
-            enable=widget.value,
-            revert=lambda: setattr(widget, "value", not widget.value),
+        on_change=make_mode_handler(
+            "playback_enable_direct_mode", "spdif_direct_mode"
         ),
+        help=help_text.direct_mode(),
     )
     hid_section.add(direct_mode_row)
 
     spdif_direct_mode_row = widgets.switch_row(
         "SPDIF-Out Direct Mode",
         value=playback_model.get_spdif_out_direct_mode_enabled(),
-        on_change=lambda widget: controller.submit(
-            "playback_enable_spdif_out_direct_mode",
-            enable=widget.value,
-            revert=lambda: setattr(widget, "value", not widget.value),
+        on_change=make_mode_handler(
+            "playback_enable_spdif_out_direct_mode", "direct_mode"
         ),
+        help=help_text.spdif_out_direct(),
     )
     hid_section.add(spdif_direct_mode_row)
+
+    if not DIRECT_MODE_SUPPORTED:
+        # Only Direct Mode is known to be overridden by the OS. SPDIF-Out Direct
+        # is a third state that macOS's Clock Source (DSP Clock / Stereo Direct)
+        # has no equivalent for, so it may well still work -- it is left enabled
+        # rather than disabled on an assumption nobody has tested.
+        widgets.set_enabled(direct_mode_row.control_row, False)
+        hid_section.add(widgets.warning_block(_DIRECT_MODE_UNSUPPORTED))
+        if IS_MACOS:
+            hid_section.add(
+                widgets.button_row(
+                    ("Open Audio MIDI Setup", _on_open_audio_midi_setup)
+                )
+            )
 
     filter_row = widgets.select_row(
         "Filter",
@@ -63,6 +124,7 @@ def build(controller: G6Controller) -> toga.Widget:
             "playback_filter",
             playback_filter_enum=convert.filter_from_label(widget.value),
         ),
+        help=help_text.FILTER,
     )
     hid_section.add(filter_row)
 
@@ -74,8 +136,10 @@ def build(controller: G6Controller) -> toga.Widget:
             "decoder_mode",
             decoder_mode_enum=convert.decoder_from_label(widget.value),
         ),
+        help=help_text.DECODER,
     )
     hid_section.add(decoder_row)
+    hid_section.add(widgets.note_block(_DECODER_NOTE))
 
     content.add(hid_section)
     content.output = output_row
@@ -117,6 +181,7 @@ def _build_audio_section(controller: G6Controller, playback_model) -> toga.Box:
             mute=widget.value,
             revert=lambda: setattr(widget, "value", not widget.value),
         ),
+        help=help_text.PLAYBACK_MUTE,
     )
     audio_section.add(mute_row)
 
@@ -127,6 +192,7 @@ def _build_audio_section(controller: G6Controller, playback_model) -> toga.Box:
         on_change=lambda widget: _on_volume_change(
             controller, volume_row.slider.value, widget.value
         ),
+        help=help_text.CHANNELS,
     )
 
     def _on_volume_slider_change(widget):
@@ -139,6 +205,7 @@ def _build_audio_section(controller: G6Controller, playback_model) -> toga.Box:
         value=playback_model.get_volume(next(iter(convert.channels_from_label("Both")))),
         step=1,
         on_change=_on_volume_slider_change,
+        help=help_text.PLAYBACK_VOLUME,
     )
 
     audio_section.add(volume_row)

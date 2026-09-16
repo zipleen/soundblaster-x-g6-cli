@@ -11,7 +11,7 @@ import toga
 import g6_cli
 import g6_gui
 from g6_cli.g6_api import DEFAULT_MODEL_PATH
-from g6_gui import widgets
+from g6_gui import help as help_text, widgets
 from g6_gui.controller import G6Controller
 from g6_gui.platform import AUDIO_INTERFACE_SUPPORTED
 
@@ -50,6 +50,7 @@ def build(
             "Claim audio interface",
             value=False,
             on_change=_make_claim_handler(controller, on_claim_changed),
+            help=help_text.SYSTEM_CLAIM,
         )
         audio_section.add(claim_row)
 

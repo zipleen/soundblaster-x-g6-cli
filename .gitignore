@@ -11,3 +11,7 @@ dist/
 .build-venv/
 *.dmg
 .DS_Store
+
+# Reference PDFs saved locally while researching docs/settings-reference.md.
+# Creative copyright, so not redistributed with the project.
+docs/pdfs/

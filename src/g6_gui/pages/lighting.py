@@ -5,7 +5,7 @@ from __future__ import annotations
 import toga
 from toga.style.pack import Pack
 
-from g6_gui import widgets
+from g6_gui import help as help_text, widgets
 from g6_gui.controller import G6Controller
 
 TITLE = "Lighting"
@@ -59,11 +59,19 @@ def build(controller: G6Controller) -> toga.Widget:
             send_rgb()
 
     enabled_row = widgets.switch_row(
-        "Enabled", value=initial_enabled, on_change=on_enabled_change
+        "Enabled",
+        value=initial_enabled,
+        on_change=on_enabled_change,
+        help=help_text.LIGHTING_ENABLED,
     )
 
     red_row = widgets.slider_row(
-        "Red", min=0, max=255, value=initial_red, on_change=on_rgb_change
+        "Red",
+        min=0,
+        max=255,
+        value=initial_red,
+        on_change=on_rgb_change,
+        help=help_text.LIGHTING_COLOUR,
     )
     green_row = widgets.slider_row(
         "Green", min=0, max=255, value=initial_green, on_change=on_rgb_change

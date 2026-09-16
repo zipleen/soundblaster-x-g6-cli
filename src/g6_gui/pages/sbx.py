@@ -21,7 +21,7 @@ import toga
 
 from g6_cli.g6_model.sbx import Profile
 from g6_cli.g6_spec import AudioFeature, SmartVolumeSpecialHex
-from g6_gui import convert, widgets
+from g6_gui import convert, help as help_text, widgets
 from g6_gui.controller import G6Controller
 
 TITLE = "SBX"
@@ -71,6 +71,15 @@ _EFFECTS = [
 ]
 
 
+_EFFECT_HELP = {
+    "surround": help_text.SBX_SURROUND,
+    "crystalizer": help_text.SBX_CRYSTALIZER,
+    "bass": help_text.SBX_BASS,
+    "smart_volume": help_text.SBX_SMART_VOLUME,
+    "dialog_plus": help_text.SBX_DIALOG_PLUS,
+}
+
+
 def is_available() -> bool:
     return True
 
@@ -99,7 +108,12 @@ def build(controller: G6Controller) -> toga.Widget:
 
     # A mutable holder so every closure below reads the *current* editing
     # profile at send time rather than capturing it at build time.
-    state = {"editing": active_profile}
+    # ``repopulating`` guards the effect handlers while on_editing_change
+    # rewrites every control. Toga's Cocoa backend fires on_change for a
+    # *programmatic* ``widget.value = x``, so without this, merely picking a
+    # different profile in the dropdown writes that profile to the device --
+    # silently performing the switch that the button below is meant to do.
+    state = {"editing": active_profile, "repopulating": False}
 
     def editing_profile() -> Profile.Name:
         return state["editing"]
@@ -121,6 +135,8 @@ def build(controller: G6Controller) -> toga.Widget:
         sbx = model.get_sbx(profile_name=state["editing"])
 
         def on_toggle(widget):
+            if state["repopulating"]:
+                return
             controller.submit(
                 "sbx_toggle",
                 profile_name=editing_profile(),
@@ -130,6 +146,8 @@ def build(controller: G6Controller) -> toga.Widget:
             )
 
         def on_slider(widget):
+            if state["repopulating"]:
+                return
             controller.debounced(
                 f"sbx_{attr}",
                 "sbx_slider",
@@ -138,7 +156,9 @@ def build(controller: G6Controller) -> toga.Widget:
                 value=int(widget.value),
             )
 
-        toggle = widgets.switch_row(label, value=getattr(sbx, toggle_getter)(), on_change=on_toggle)
+        toggle = widgets.switch_row(
+            label, value=getattr(sbx, toggle_getter)(), on_change=on_toggle
+        )
         # The switch already carries the effect's name; repeating it on the
         # slider row just prints "Bass" twice under itself.
         slider = widgets.slider_row(
@@ -155,6 +175,8 @@ def build(controller: G6Controller) -> toga.Widget:
         row.add(slider)
         row.toggle = toggle
         row.slider = slider
+        # Button beside the label, explanation below the slider.
+        widgets.help_for(row, anchor=toggle, text=_EFFECT_HELP[attr])
         return row
 
     def on_editing_change(widget) -> None:
@@ -162,13 +184,25 @@ def build(controller: G6Controller) -> toga.Widget:
         state["editing"] = new_profile
         sbx = model.get_sbx(profile_name=new_profile)
 
-        for attr, _label, _toggle_feature, _slider_feature, toggle_getter, slider_getter in _EFFECTS:
-            row = effect_rows[attr]
-            row.toggle.switch.value = getattr(sbx, toggle_getter)()
-            row.slider.slider.value = getattr(sbx, slider_getter)()
+        state["repopulating"] = True
+        try:
+            for (
+                attr,
+                _label,
+                _toggle_feature,
+                _slider_feature,
+                toggle_getter,
+                slider_getter,
+            ) in _EFFECTS:
+                row = effect_rows[attr]
+                row.toggle.switch.value = getattr(sbx, toggle_getter)()
+                row.slider.slider.value = getattr(sbx, slider_getter)()
 
-        special = sbx.get_smart_volume_special()
-        smart_volume_special.selection.value = _special_label(special)
+            special = sbx.get_smart_volume_special()
+            smart_volume_special.selection.value = _special_label(special)
+        finally:
+            state["repopulating"] = False
+
         widgets.set_enabled(effect_rows["smart_volume"].slider, special is None)
 
         refresh_banner()
@@ -178,6 +212,7 @@ def build(controller: G6Controller) -> toga.Widget:
         items=convert.PROFILE_LABELS,
         value=state["editing"].value,
         on_change=on_editing_change,
+        help=help_text.SBX_PROFILE,
     )
 
     def on_switch_press(widget, *_args, **_kwargs) -> None:
@@ -190,25 +225,20 @@ def build(controller: G6Controller) -> toga.Widget:
 
         asyncio.ensure_future(refresh_after_switch())
 
-    switch_button = toga.Button("Switch to this profile", on_press=on_switch_press)
-    switch_button_row = toga.Box(
-        style=toga.style.pack.Pack(direction=toga.style.pack.ROW, margin_bottom=12)
+    switch_button_row = widgets.button_row(
+        ("Switch to this profile", on_switch_press), help=help_text.SBX_SWITCH_BUTTON
     )
-    switch_button_row.add(switch_button)
+    switch_button = switch_button_row.buttons[0]
 
     content.add(editing)
     content.add(banner)
     content.add(switch_button_row)
 
-    for attr, label, toggle_feature, slider_feature, toggle_getter, slider_getter in _EFFECTS:
-        row = make_effect_row(attr, label, toggle_feature, slider_feature, toggle_getter, slider_getter)
-        effect_rows[attr] = row
-        content.add(row)
-        setattr(content, attr, row)
-
     def on_smart_volume_special_change(widget) -> None:
         special = convert.smart_volume_special_from_label(widget.value)
         smart_volume_slider = effect_rows["smart_volume"].slider
+        if state["repopulating"]:
+            return
         if special is None:
             widgets.set_enabled(smart_volume_slider, True)
             return
@@ -226,9 +256,22 @@ def build(controller: G6Controller) -> toga.Widget:
         items=convert.SMART_VOLUME_LABELS,
         value=_special_label(initial_special),
         on_change=on_smart_volume_special_change,
+        help=help_text.SBX_SMART_VOLUME_SPECIAL,
     )
+
+    # Smart Volume special overrides the Smart Volume slider, so it belongs
+    # directly underneath it rather than stranded at the bottom of the tab.
+    for attr, label, toggle_feature, slider_feature, toggle_getter, slider_getter in _EFFECTS:
+        row = make_effect_row(
+            attr, label, toggle_feature, slider_feature, toggle_getter, slider_getter
+        )
+        effect_rows[attr] = row
+        content.add(row)
+        setattr(content, attr, row)
+        if attr == "smart_volume":
+            content.add(smart_volume_special)
+
     widgets.set_enabled(effect_rows["smart_volume"].slider, initial_special is None)
-    content.add(smart_volume_special)
 
     content.editing = editing
     content.banner = banner

@@ -5,7 +5,7 @@ from __future__ import annotations
 import toga
 
 from g6_cli.g6_spec.recording import MicrophoneEqualizerPreset
-from g6_gui import convert, widgets
+from g6_gui import convert, help as help_text, widgets
 from g6_gui.controller import G6Controller
 from g6_gui.platform import AUDIO_INTERFACE_SUPPORTED
 
@@ -32,6 +32,7 @@ def build(controller: G6Controller) -> toga.Widget:
         on_change=lambda widget: controller.submit(
             "recording_mic_boost", decibel=int(widget.value)
         ),
+        help=help_text.REC_MIC_BOOST,
     )
     hid_section.add(mic_boost_row)
 
@@ -76,6 +77,7 @@ def _build_voice_clarity_section(controller: G6Controller, recording_model) -> t
             "recording_voice_clarity_noise_reduction_level",
             level_percent=int(widget.value),
         ),
+        help=help_text.REC_NOISE_REDUCTION_LEVEL,
     )
 
     noise_reduction_row = widgets.switch_row(
@@ -84,6 +86,7 @@ def _build_voice_clarity_section(controller: G6Controller, recording_model) -> t
         on_change=lambda widget: _on_noise_reduction_change(
             controller, widget, noise_reduction_level_row
         ),
+        help=help_text.REC_NOISE_REDUCTION,
     )
     section.add(noise_reduction_row)
     section.add(noise_reduction_level_row)
@@ -99,6 +102,7 @@ def _build_voice_clarity_section(controller: G6Controller, recording_model) -> t
             enable=widget.value,
             revert=lambda: setattr(widget, "value", not widget.value),
         ),
+        help=help_text.REC_AEC,
     )
     section.add(aec_row)
 
@@ -110,6 +114,7 @@ def _build_voice_clarity_section(controller: G6Controller, recording_model) -> t
             enable=widget.value,
             revert=lambda: setattr(widget, "value", not widget.value),
         ),
+        help=help_text.REC_SMART_VOLUME,
     )
     section.add(smart_volume_row)
 
@@ -121,12 +126,14 @@ def _build_voice_clarity_section(controller: G6Controller, recording_model) -> t
             "recording_voice_clarity_mic_equalizer_preset",
             preset=convert.eq_preset_from_label(widget.value),
         ),
+        help=help_text.REC_MIC_EQ_PRESET,
     )
 
     mic_eq_row = widgets.switch_row(
         "Mic Equalizer",
         value=recording_model.get_voice_clarity_mic_equalizer_enabled(),
         on_change=lambda widget: _on_mic_eq_change(controller, widget, mic_eq_preset_row),
+        help=help_text.REC_MIC_EQ,
     )
     section.add(mic_eq_row)
     section.add(mic_eq_preset_row)
@@ -177,6 +184,7 @@ def _build_audio_section(controller: G6Controller, recording_model) -> toga.Box:
             mute=widget.value,
             revert=lambda: setattr(widget, "value", not widget.value),
         ),
+        help=help_text.REC_MUTE,
     )
     audio_section.add(mute_row)
 
@@ -187,6 +195,7 @@ def _build_audio_section(controller: G6Controller, recording_model) -> toga.Box:
         on_change=lambda widget: _on_rec_volume_change(
             controller, rec_volume_row.slider.value, widget.value
         ),
+        help=help_text.CHANNELS,
     )
 
     def _on_rec_volume_slider_change(widget):
@@ -201,6 +210,7 @@ def _build_audio_section(controller: G6Controller, recording_model) -> toga.Box:
         ),
         step=10,
         on_change=_on_rec_volume_slider_change,
+        help=help_text.REC_VOLUME,
     )
 
     audio_section.add(rec_volume_row)
@@ -224,6 +234,7 @@ def _build_audio_section(controller: G6Controller, recording_model) -> toga.Box:
         on_change=lambda widget: _on_mon_volume_change(
             controller, mon_volume_row.slider.value, widget.value
         ),
+        help=help_text.CHANNELS,
     )
 
     def _on_mon_volume_slider_change(widget):
@@ -238,6 +249,7 @@ def _build_audio_section(controller: G6Controller, recording_model) -> toga.Box:
         ),
         step=10,
         on_change=_on_mon_volume_slider_change,
+        help=help_text.REC_MONITORING,
     )
 
     audio_section.add(mon_volume_row)

@@ -16,12 +16,60 @@ system or your device!
 ## Desktop GUI
 
 A cross-platform desktop GUI (Linux and macOS) is available alongside the CLI,
-exposing every CLI option as a native control:
+exposing every CLI option as a native control.
+
+### Run it from a clone (development)
+
+Use this while working on the GUI. The project is installed **editable**, so
+edits under `src/` take effect the next time you launch — no rebuild:
+
+```bash
+git clone https://github.com/zipleen/soundblaster-x-g6-cli.git
+cd soundblaster-x-g6-cli
+git checkout main-gui
+python3.12 -m venv venv
+./venv/bin/pip install -e '.[gui]'
+./venv/bin/soundblaster-x-g6-gui
+```
+
+Confirm which build you are running:
+
+```bash
+./venv/bin/soundblaster-x-g6-gui --version
+```
+
+Run the GUI test suite with:
+
+```bash
+./venv/bin/pytest tests/g6_gui
+```
+
+Note the G6 must be plugged in even with `--dry-run`: the API opens the device
+when it is constructed, and `--dry-run` suppresses sending rather than opening.
+More detail in [docs/gui.md](docs/gui.md#running-the-development-version).
+
+### Install it into your own Python
+
+Use this to have `soundblaster-x-g6-gui` on your `PATH`, served by whichever
+Python is active rather than by a venv in the clone. Run it from the repository
+root — the `.` in the command is this directory:
 
 ```bash
 pip install -e '.[gui]'
 soundblaster-x-g6-gui
 ```
+
+`-e` keeps it pointing at your working copy, so edits still take effect. Drop
+the `-e` for a fixed snapshot that stops following your changes.
+
+### Build a standalone app
+
+To produce a self-contained macOS `.app`/`.dmg` that needs neither Python nor
+Homebrew on the target machine, see
+**[packaging/README.md](packaging/README.md)** for the build, the
+self-containment checks and the signing/notarisation steps.
+
+### Notes
 
 On Linux it additionally needs system GTK (`python3-gi`, `gir1.2-gtk-3.0` on
 Debian/Ubuntu). macOS shows fewer controls than Linux, because the features that
@@ -40,9 +88,14 @@ How settings are stored, and why `~/.soundblaster-x-g6/g6.json` is a record
 rather than a configuration file, is explained in
 [docs/device-state.md](docs/device-state.md).
 
+Not sure what Direct Mode, the four filters, the decoder modes or the mic EQ
+presets actually do? [docs/settings-reference.md](docs/settings-reference.md)
+documents every setting, with the packet-level evidence for each claim.
+
 ### Standalone macOS app
 
-To build a self-contained `.app` and `.dmg` that need neither Python nor
+Full instructions live in [packaging/README.md](packaging/README.md). The short
+version — build a self-contained `.app` and `.dmg` that need neither Python nor
 Homebrew on the target machine:
 
 ```bash

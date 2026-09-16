@@ -24,7 +24,48 @@ sudo dnf install python3-gobject gtk3          # Fedora
 sudo pacman -S python-gobject gtk3             # Arch
 ```
 
-## Run
+## Running the development version
+
+This repository already has a `venv/` with the project installed **editable**,
+so your edits to `src/` take effect immediately — no reinstall, no build step:
+
+```bash
+./venv/bin/soundblaster-x-g6-gui
+```
+
+Starting from scratch, or after the venv is gone:
+
+```bash
+python3.12 -m venv venv && ./venv/bin/pip install -e '.[gui]'
+```
+
+Check which version you are actually running — the development GUI reports its
+own version, separate from the bundled CLI's:
+
+```bash
+./venv/bin/soundblaster-x-g6-gui --version
+```
+
+A few things worth knowing:
+
+- **The G6 must be plugged in, even with `--dry-run`.** `G6Api()` raises
+  `IOError` at construction when no device is attached, so the app shows its
+  device gate rather than starting. `--dry-run` suppresses *sending*, not
+  *opening*.
+- **Re-run `pip install -e .` only after adding a new package directory** under
+  `src/`. Editing existing files needs nothing.
+- **Run the test suite with `./venv/bin/pytest tests/g6_gui`.** Do not run
+  `tests/g6_cli`: that suite fails on Python 3.12 for reasons unrelated to this
+  work (argparse changed its error wording upstream).
+- The installed `.app` in `/Applications` is a *different* copy with its own
+  bundled Python. Changing `src/` does not affect it — rebuild with
+  `packaging/build-macos.sh` for that.
+
+To see a page without any hardware, build it against the recording double in
+`tests/g6_gui/fake_api.py`; that is how the screenshots in this repository were
+produced.
+
+## Run (installed)
 
 ```bash
 soundblaster-x-g6-gui
@@ -57,6 +98,42 @@ running.
 | **SBX** | Profile editor and the five effects — see below |
 | **Lighting** | Enable, R/G/B, colour preview |
 | **System** | Version and state-file path, *and on Linux* Claim/Release audio interface and Reload audio services |
+
+## What the settings actually do
+
+Every control has an **ⓘ** button next to it. Press it and a plain-language
+explanation expands underneath; press **✕** to collapse it. The button stays
+usable even when the control itself is disabled, which is when you most want to
+know why.
+
+For the long version — every option, what it changes, when it does nothing, and
+how confident we are in each claim — see
+[settings-reference.md](settings-reference.md). The help text in the app is a
+condensed version of that document, and both are generated from the same source
+(`src/g6_gui/help.py`).
+
+## Direct Mode on macOS
+
+Direct Mode cannot be set by this app on macOS, so its switch is **disabled** on
+the Playback tab. macOS continuously asserts the device's mode through Core
+Audio and overwrites whatever the G6 was told — Creative documents this
+themselves.
+
+**SPDIF-Out Direct is left enabled.** macOS's Clock Source has only two
+positions and neither corresponds to it, so it is *unverified* rather than
+known-broken; disabling it would have asserted a limitation nobody has shown and
+removed the only way to test it.
+
+Use **Audio MIDI Setup** instead; the Playback tab has a button that opens it.
+Select the G6 and set **Clock Source**:
+
+| Clock Source | What you get |
+|---|---|
+| **DSP Clock** | All effects available (SBX, filters), capped at 32-bit/48 kHz |
+| **Stereo Direct** | Direct Mode — bit-perfect up to 32-bit/384 kHz, no SBX, **no microphone** |
+
+One trap: DSP Clock cannot do 384 kHz. Drop the format to 2 ch/24-bit/48 kHz
+*before* switching back, or audio breaks until you do.
 
 ## Why macOS shows fewer controls
 

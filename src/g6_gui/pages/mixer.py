@@ -5,7 +5,7 @@ from __future__ import annotations
 import toga
 
 from g6_cli.g6_spec import BOTH_CHANNELS, Channel
-from g6_gui import convert, widgets
+from g6_gui import convert, help as help_text, widgets
 from g6_gui.controller import G6Controller
 from g6_gui.platform import AUDIO_INTERFACE_SUPPORTED
 
@@ -55,7 +55,9 @@ def _build_group(controller: G6Controller, attr: str, prefix: str, label: str) -
     def on_channels_change(widget):
         selected_channels["channels"] = convert.channels_from_label(widget.value)
 
-    mute_row = widgets.switch_row("Mute", value=mute_getter(), on_change=on_mute_change)
+    mute_row = widgets.switch_row(
+        "Mute", value=mute_getter(), on_change=on_mute_change, help=help_text.MIXER_SOURCE
+    )
     volume_row = widgets.slider_row(
         "Volume",
         min=0,
@@ -69,6 +71,7 @@ def _build_group(controller: G6Controller, attr: str, prefix: str, label: str) -
         items=convert.CHANNEL_LABELS,
         value=convert.CHANNEL_LABELS[0],
         on_change=on_channels_change,
+        help=help_text.CHANNELS,
     )
 
     group_box = widgets.section(label)
@@ -92,6 +95,7 @@ def build(controller: G6Controller) -> toga.Widget:
             mute=widget.value,
             revert=lambda: setattr(playback_mute_row.switch, "value", not widget.value),
         ),
+        help=help_text.MIXER_PLAYBACK_MUTE,
     )
 
     children = [playback_mute_row]
