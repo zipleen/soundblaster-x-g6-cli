@@ -13,6 +13,24 @@ machine's Xcode SDK headers, not from memory or an online mirror:
     .../MacOSX.sdk/System/Library/Frameworks/CoreAudio.framework/Versions/A/Headers/AudioHardware.h
     .../MacOSX.sdk/System/Library/Frameworks/CoreAudio.framework/Versions/A/Headers/AudioHardwareBase.h
     .../MacOSX.sdk/System/Library/Frameworks/CoreAudioTypes.framework/Versions/A/Headers/CoreAudioBaseTypes.h
+    .../MacOSX.sdk/System/Library/Frameworks/AudioToolbox.framework/Versions/A/Headers/AudioHardwareService.h
+
+(On this machine the bare `xcrun --show-sdk-path` Command Line Tools SDK does
+not contain these at all -- they only exist under the full Xcode.app's own
+SDK, `/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/
+Developer/SDKs/MacOSX.sdk`. Worth remembering if this is repeated elsewhere.)
+
+The output-volume read added for the full-scale-distortion warning (see
+_CoreAudioHal.output_volume) uses a selector from that last header,
+`kAudioHardwareServiceDeviceProperty_VirtualMainVolume` ('vmvc') --
+historically paired with the separate `AudioHardwareServiceGetPropertyData`
+entry points, which the same header marks "no longer supported" since macOS
+10.11. Those deprecated entry points are deliberately NOT used here: the
+selector itself is passed to the same ordinary `AudioObjectGetPropertyData`
+already used for everything else in this file (confirmed as the correct,
+current approach against JUCE's own CoreAudio backend, which does exactly
+this). See the module's other honesty note below about what is and is not
+established for the G6 specifically.
 
 The mechanism itself -- device enumeration, CFString name extraction, clock
 source enumeration/translation/get/set, and stream physical-format get/set,
@@ -22,13 +40,57 @@ Core Audio devices on this machine (BlackHole 2ch, which genuinely implements
 multiple clock sources, plus the built-in speakers/mic) before this module was
 written, including full write/readback round trips. See HANDOFF.md.
 
-What was **not** validated, because no G6 was attached while this was written:
-the specific clock source names/codes and format list the G6's own driver
-reports. This module does not assume any of that -- it identifies the device
-by the one thing we know for certain from Creative's own documentation: it is
-the only audio device whose clock sources are named exactly "DSP Clock" and
-"Stereo Direct". Anything that does not match that shape is treated as
-unsupported and left alone rather than guessed at.
+The clock source names/codes and format list were confirmed live against a
+real G6 in an earlier session (see HANDOFF.md gotchas 24/25) -- Core Audio
+calls it "Sound BlasterX G6", and its clock sources are named exactly "DSP
+Clock" and "Stereo Direct", matching what find_g6() looks for. This module
+still does not identify the device by name -- it identifies it by that
+clock-source fingerprint alone, deliberately, so a firmware rename or a
+different device entirely is treated as unsupported and left alone rather
+than guessed at.
+
+VERIFIED against a real G6 on 2026-09-17, via `experimental/verify-coreaudio-volume.py`
+(device 50, clock sources DSP Clock / Stereo Direct -- a genuine G6, not a
+guess):
+
+  - 'vmvc' (kAudioHardwareServiceDeviceProperty_VirtualMainVolume) is NOT
+    implemented. The 'volm' fallback below is necessary, not defensive
+    padding for a case that never happens.
+  - 'volm' (kAudioDevicePropertyVolumeScalar) is NOT implemented on the
+    master element either. It IS implemented per-channel, on elements 1 and
+    2 -- so the element fallback in output_volume() is load-bearing: without
+    it, this device reports no volume at all.
+  - The device exposes exactly 2 output channels and offers zero non-stereo
+    formats. Virtual 7.1 is genuinely unavailable to macOS on this device --
+    now measured directly, not inferred from the AudioControl claim gate.
+  - Because the G6 exposes a hardware volume control at all (elements 1/2
+    above), macOS's own volume handling for it forwards to the device's own
+    volume control rather than attenuating purely on the host -- that is
+    simply what a device-side AudioControl object *is*. This resolves the
+    "host or device?" question this docstring used to leave open: it is the
+    device.
+
+    That said, a narrower question replaces it, and this module does not
+    claim to know the answer: WHERE inside the G6 that attenuation happens
+    -- digital, ahead of the DAC, or analog, after it -- is still unknown,
+    and that is what actually determines whether lowering the volume cures
+    the ASR-measured full-scale distortion (see is_full_scale_volume()).
+    Reducing output amplitude lowers the current the output stage draws
+    either way, which is the USB-supply-sag mechanism ASR's writeup
+    describes -- so the practical advice to turn it down still holds -- but
+    this module treats that as reasoned, not proven, and says so where the
+    warning logic lives.
+
+Still NOT validated, because `experimental/verify-coreaudio-volume.py` only ever
+probed kAudioDevicePropertyVolumeDecibels ('vold') on output/main -- the same
+element where 'volm' was also absent -- and never asked elements 1/2, where
+'volm' turned out to actually live: whether 'vold' is implemented per-channel
+the same way. output_volume_db() below mirrors output_volume()'s element
+fallback on the working assumption that it is (same AudioControl object
+generally implements both the scalar and the dB view of one control), but
+this is inference from the volm pattern, not a separate measurement. The
+extended verify script now probes 'vold' on main *and* both channels
+specifically to settle this on the next run.
 """
 
 from __future__ import annotations
@@ -67,6 +129,46 @@ SAFE_HANDOFF_BITS = 24
 # wrong code) still surfaces as an honest error rather than hanging forever.
 SETTLE_POLL_INTERVAL = 0.05
 SETTLE_POLL_ATTEMPTS = 60
+
+# ASR's finding, cited by both thresholds below: ~1% THD at 20 Hz at 0 dBFS,
+# fixed entirely by dropping 2 dB (SINAD 107 -> 112 dB). See docs/g6-re/.
+#
+# FULL_SCALE_VOLUME_DB_THRESHOLD is the *preferred* threshold, in dB, used
+# whenever output_volume_db() returns a reading (see is_full_scale_volume()).
+# Warn when the volume-control dB reading exceeds -2.0 dBFS.
+#
+# IMPORTANT, and easy to get wrong: ASR's -2 dBFS was a *digital signal
+# level* fed into the device under test -- a property of the audio content,
+# not of a volume-control setting. The dB this module reads back from
+# kAudioDevicePropertyVolumeDecibels is a property of the *volume control*.
+# These are not the same quantity, and this module does not pretend they
+# are measured to be equivalent. The reasoned justification for treating
+# the volume-control dB as a stand-in: both quantities scale the same
+# thing -- the amplitude the G6 actually drives its output stage at -- so a
+# volume control sitting within 2 dB of its own top reduces output
+# amplitude by materially less than the 2 dB ASR needed to clear the
+# distortion, for the same reason turning the control down at all helps
+# (see the module docstring's supply-sag paragraph). That reasoning is
+# judged sound enough to act on, but it is reasoned, not measured -- nothing
+# on this machine has actually played ASR's test signal through the G6 and
+# confirmed the distortion clears at exactly this control setting.
+FULL_SCALE_VOLUME_DB_THRESHOLD = -2.0
+
+# Fallback used only when output_volume_db() returned None (this device's
+# 'vold', if it even exists, was unreachable) -- see is_full_scale_volume().
+# Not exactly 1.0: Core Audio's own header documents
+# kAudioDevicePropertyVolumeScalar as a many-to-one mapping onto a much
+# smaller set of real hardware steps, so the top step may read back as
+# something just under 1.0 rather than exactly 1.0. >=0.99 catches "the top
+# step" without demanding an exact float equality that hardware
+# quantization has no obligation to produce.
+#
+# This is a materially cruder proxy than the dB threshold above: Core
+# Audio's scalar-to-dB mapping is strongly non-linear (measured live on this
+# machine -- 'Mac mini Speakers' reads scalar 0.6933 = -10.63 dB), so a
+# scalar-only threshold this close to 1.0 can miss several of the top steps
+# sitting well above -2 dBFS. Only used when there is nothing better.
+FULL_SCALE_VOLUME_THRESHOLD = 0.99
 
 
 @dataclass(frozen=True)
@@ -116,6 +218,40 @@ class ClockState:
     current_format: Format | None = None
     available_formats: tuple[Format, ...] = ()
 
+    # -- Output volume. VERIFIED on the real G6 (see module docstring): reads
+    # via the per-channel 'volm' fallback, since neither 'vmvc' nor
+    # master-element 'volm' exist on this device. ``None`` means the device
+    # implements none of the properties tried at all -- "no host-settable
+    # volume" -- which is a real, distinct case from "volume is 0.0" and
+    # must never be conflated with it by a caller.
+    output_volume: float | None = None
+
+    # -- Output volume in dB, from kAudioDevicePropertyVolumeDecibels
+    # ('vold'), mirroring output_volume()'s element fallback. Preferred over
+    # the scalar above for the full-scale warning (see
+    # FULL_SCALE_VOLUME_DB_THRESHOLD and is_full_scale_volume()) because the
+    # scalar-to-dB mapping is non-linear enough that a scalar-only threshold
+    # can miss several of the top steps. UNVERIFIED whether the G6
+    # implements this per-channel the same way it does 'volm' -- see the
+    # module docstring's "Still NOT validated" paragraph. ``None`` means no
+    # element implements it (including simply "not yet confirmed to exist on
+    # this device at all"), not "0 dB".
+    output_volume_db: float | None = None
+
+    # -- Channel count / "virtual 7.1" reality check (see docs/g6-re/,
+    # Question B). filter_stereo_pcm_formats() already throws away every
+    # non-stereo entry before it reaches ``available_formats`` above -- these
+    # two fields exist purely so this module is not *blind* to what got
+    # filtered out, without changing what the Format dropdown offers.
+    # ``output_channels`` is the channel count of the currently active
+    # stream format (``current_format.channels``, surfaced separately so
+    # callers do not have to reach into ``current_format`` themselves);
+    # ``None`` when no format could be read. ``non_stereo_formats_available``
+    # is whether the *unfiltered* available-format list for the current
+    # clock source contained anything other than a plain 2-channel format.
+    output_channels: int | None = None
+    non_stereo_formats_available: bool = False
+
 
 # ── Pure logic — no ctypes, no I/O, fully unit-testable ─────────────────────
 
@@ -162,6 +298,41 @@ def sort_formats(formats: list[Format]) -> list[Format]:
     return sorted(formats, key=lambda f: (f.sample_rate, f.bits_per_channel, f.non_mixable))
 
 
+def is_full_scale_volume(volume: float | None, volume_db: float | None = None) -> bool:
+    """Whether the current volume reading is close enough to the top that
+    ASR's full-scale distortion finding applies (see
+    FULL_SCALE_VOLUME_DB_THRESHOLD for the full reasoning on why a
+    volume-control dB reading is treated as a stand-in for ASR's digital
+    signal level, and why that is reasoned rather than measured).
+
+    Prefers ``volume_db`` when it is available: warn when it is above
+    FULL_SCALE_VOLUME_DB_THRESHOLD (-2.0 dBFS). This is a strictly finer
+    instrument than the scalar -- Core Audio's scalar-to-dB mapping is
+    non-linear enough that several of the top scalar steps can sit above
+    -2 dB while still reading well under the scalar threshold below.
+
+    Falls back to ``volume >= FULL_SCALE_VOLUME_THRESHOLD`` only when
+    ``volume_db`` is ``None`` (this device's 'vold', if it exists at all, was
+    not reachable). ``volume is None`` too -- no host-settable volume at
+    all -- is never "full scale" either way: there is nothing here to warn
+    about, and claiming otherwise would imply a reading that was never
+    actually taken.
+    """
+    if volume_db is not None:
+        return volume_db > FULL_SCALE_VOLUME_DB_THRESHOLD
+    return volume is not None and volume >= FULL_SCALE_VOLUME_THRESHOLD
+
+
+def has_non_stereo_formats(formats: list[Format]) -> bool:
+    """Whether ``formats`` (an *unfiltered* available-format list) contains
+    anything filter_stereo_pcm_formats() would drop.
+
+    Pure counterpart to filter_stereo_pcm_formats() -- exists so refresh()
+    can report what got filtered out without changing what gets filtered.
+    """
+    return any(f.channels != 2 for f in formats)
+
+
 # ── Hal: the thin ctypes adapter, swappable in tests ────────────────────────
 
 
@@ -196,6 +367,21 @@ class Hal:
         raise NotImplementedError
 
     def set_format(self, stream_id: int, fmt: Format) -> None:
+        raise NotImplementedError
+
+    def output_volume(self, device_id: int) -> float | None:
+        """The device's output volume, 0.0-1.0, or ``None`` if it exposes no
+        host-settable volume property at all -- a real, distinct case from a
+        volume of 0.0, never to be conflated with it. See
+        _CoreAudioHal.output_volume for what a real implementation tries."""
+        raise NotImplementedError
+
+    def output_volume_db(self, device_id: int) -> float | None:
+        """The device's output volume in dBFS, or ``None`` if it exposes no
+        host-settable dB volume property at all -- again a real, distinct
+        case, never to be conflated with a reading of 0 dB. See
+        _CoreAudioHal.output_volume_db for what a real implementation tries
+        and what is and is not confirmed about the G6 specifically."""
         raise NotImplementedError
 
 
@@ -275,6 +461,28 @@ class _CoreAudioHal(Hal):
         self.k_clock_source_name = fourcc("lcsn")
         self.k_physical_format = fourcc("pft ")
         self.k_available_physical_formats = fourcc("pfta")
+
+        # kAudioHardwareServiceDeviceProperty_VirtualMainVolume -- the
+        # "menu bar" scalar. AudioHardwareService.h documents it as passed
+        # with scope=global, element=main; see the module docstring for why
+        # it is read through the ordinary AudioObjectGetPropertyData below
+        # rather than the deprecated AudioHardwareService*() functions.
+        self.k_virtual_main_volume = fourcc("vmvc")
+        # kAudioDevicePropertyVolumeScalar -- the plain per-element scalar
+        # many USB audio class devices expose even without a "virtual main"
+        # volume control. Confirmed against AudioHardware.h: "A Float32 that
+        # represents the value of the volume control. The range is between
+        # 0.0 and 1.0 (inclusive)." CONFIRMED on the real G6: implemented
+        # per-channel (elements 1/2), not on the master element -- see the
+        # module docstring.
+        self.k_volume_scalar = fourcc("volm")
+        # kAudioDevicePropertyVolumeDecibels -- the same volume control's dB
+        # view. Confirmed against AudioHardware.h: "A Float32 that represents
+        # the value of the volume control in dB." Verified against Xcode's
+        # SDK, not the Command Line Tools one (HANDOFF.md gotcha 29).
+        # UNVERIFIED per-channel on the G6 specifically -- see the module
+        # docstring's "Still NOT validated" paragraph.
+        self.k_volume_decibels = fourcc("vold")
 
         OSStatus = ctypes.c_int32
         AudioObjectID = ctypes.c_uint32
@@ -462,6 +670,81 @@ class _CoreAudioHal(Hal):
             "available physical formats -- refusing to fabricate one"
         )
 
+    def output_volume(self, device_id: int) -> float | None:
+        """Read the device's output volume as macOS sees it.
+
+        Tries kAudioHardwareServiceDeviceProperty_VirtualMainVolume ('vmvc')
+        first, on scope=global/element=main -- the scalar that generally
+        matches what the menu bar volume slider shows. Falls back to the
+        plain kAudioDevicePropertyVolumeScalar ('volm') on the output scope
+        if 'vmvc' is not implemented, trying the master element (0) first and
+        then channels 1 and 2 -- a device without a true "main" volume
+        control commonly still exposes one per channel, and a stereo device's
+        left/right channels are elements 1 and 2 by Core Audio convention.
+
+        Returns ``None`` -- never 0.0 -- when neither property exists at
+        all: a device with no host-settable volume is a real, distinct case,
+        not the same as "volume is 0".
+
+        VERIFIED against a real G6 (see the module docstring): 'vmvc' is not
+        implemented; 'volm' is not implemented on the master element either,
+        but IS implemented on elements 1 and 2 -- so this method's element
+        fallback is exactly what makes a G6 volume reading possible at all,
+        not defensive padding for a case that never happens. Because the G6
+        has its own hardware volume control (this one), macOS forwards to
+        it rather than attenuating purely on the host -- see the module
+        docstring for the narrower question that leaves open (where inside
+        the device the attenuation actually happens).
+        """
+        if self._has(
+            device_id, self.k_virtual_main_volume,
+            scope=self.k_scope_global, element=self.k_element_main,
+        ):
+            raw = self._get_raw(
+                device_id, self.k_virtual_main_volume, 4,
+                scope=self.k_scope_global, element=self.k_element_main,
+            )
+            return ctypes.c_float.from_buffer_copy(raw).value
+
+        for element in (self.k_element_main, 1, 2):
+            if self._has(device_id, self.k_volume_scalar, scope=self.k_scope_output, element=element):
+                raw = self._get_raw(
+                    device_id, self.k_volume_scalar, 4,
+                    scope=self.k_scope_output, element=element,
+                )
+                return ctypes.c_float.from_buffer_copy(raw).value
+
+        return None
+
+    def output_volume_db(self, device_id: int) -> float | None:
+        """Read the device's output volume in dBFS, via
+        kAudioDevicePropertyVolumeDecibels ('vold').
+
+        Mirrors output_volume()'s own element fallback (main, then channels 1
+        and 2) exactly, on the working assumption that whatever AudioControl
+        object implements the scalar on a given element also implements the
+        dB view of the same control. That assumption is inference from the
+        confirmed 'volm' pattern, NOT a separate live measurement --
+        `experimental/verify-coreaudio-volume.py` only ever probed 'vold' on
+        output/main (where 'volm' was also absent) before this method
+        existed, and never asked elements 1/2 where 'volm' turned out to
+        actually live. See the module docstring's "Still NOT validated"
+        paragraph; the extended verify script now probes all three elements
+        explicitly so the next hardware run settles this for real.
+
+        Returns ``None`` -- never 0.0 -- when no element implements it: a
+        real, distinct case from "the volume control reads 0 dB".
+        """
+        for element in (self.k_element_main, 1, 2):
+            if self._has(device_id, self.k_volume_decibels, scope=self.k_scope_output, element=element):
+                raw = self._get_raw(
+                    device_id, self.k_volume_decibels, 4,
+                    scope=self.k_scope_output, element=element,
+                )
+                return ctypes.c_float.from_buffer_copy(raw).value
+
+        return None
+
 
 # ── Device identification ────────────────────────────────────────────────────
 
@@ -558,11 +841,14 @@ class ClockController:
             streams = hal.output_streams(device_id)
             stream_id = streams[0] if streams else None
             current_format = hal.current_format(stream_id) if stream_id is not None else None
-            available = (
-                sort_formats(filter_stereo_pcm_formats(hal.available_formats(stream_id)))
-                if stream_id is not None
-                else []
-            )
+            # Unfiltered, so has_non_stereo_formats() below can see what
+            # filter_stereo_pcm_formats() is about to throw away -- the
+            # "virtual 7.1 reality check" this module must not be blind to.
+            raw_available = hal.available_formats(stream_id) if stream_id is not None else []
+            available = sort_formats(filter_stereo_pcm_formats(raw_available))
+
+            output_volume = hal.output_volume(device_id)
+            output_volume_db = hal.output_volume_db(device_id)
         except OSError:
             self.state = ClockState(found=False)
             return self.state
@@ -573,6 +859,10 @@ class ClockController:
             stream_id=stream_id,
             clock_source_codes=classified,
             current_clock_source=current_name,
+            output_volume=output_volume,
+            output_volume_db=output_volume_db,
+            output_channels=current_format.channels if current_format is not None else None,
+            non_stereo_formats_available=has_non_stereo_formats(raw_available),
             current_format=current_format,
             available_formats=tuple(available),
         )

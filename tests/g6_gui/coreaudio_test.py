@@ -61,6 +61,80 @@ def test_sort_formats_orders_by_rate_then_bits():
     ]
 
 
+# ── is_full_scale_volume ─────────────────────────────────────────────────
+
+
+def test_is_full_scale_volume_true_at_and_above_the_threshold():
+    assert ca.is_full_scale_volume(1.0) is True
+    assert ca.is_full_scale_volume(ca.FULL_SCALE_VOLUME_THRESHOLD) is True
+    assert ca.is_full_scale_volume(0.995) is True
+
+
+def test_is_full_scale_volume_false_below_the_threshold():
+    assert ca.is_full_scale_volume(0.98) is False
+    assert ca.is_full_scale_volume(0.9) is False
+    assert ca.is_full_scale_volume(0.0) is False
+
+
+def test_is_full_scale_volume_false_when_no_host_settable_volume_exists():
+    """None -- not a low number -- must never read as "full scale"."""
+    assert ca.is_full_scale_volume(None) is False
+
+
+# ── is_full_scale_volume: dB-preferred decision (task: a scalar-only
+# threshold misses the top steps a dB reading can see -- see
+# FULL_SCALE_VOLUME_DB_THRESHOLD's comment for the full reasoning) ──────────
+
+
+def test_is_full_scale_volume_true_above_the_db_threshold():
+    assert ca.is_full_scale_volume(0.5, -1.0) is True  # above -2.0 dBFS
+    assert ca.is_full_scale_volume(0.5, 0.0) is True
+
+
+def test_is_full_scale_volume_false_at_or_below_the_db_threshold():
+    assert ca.is_full_scale_volume(0.99, ca.FULL_SCALE_VOLUME_DB_THRESHOLD) is False
+    assert ca.is_full_scale_volume(0.99, -5.0) is False
+
+
+def test_is_full_scale_volume_db_reading_overrides_a_disagreeing_scalar():
+    """The exact case a scalar-only threshold cannot see: a low-looking
+    scalar step that is nonetheless within 2 dB of full scale must still
+    warn, and a scalar reading that clears the old >=0.99 bar must NOT warn
+    once the dB reading shows it is well clear of -2 dBFS. If the dB branch
+    in is_full_scale_volume() were ever deleted (falling through to the
+    scalar unconditionally), both assertions below would flip and fail --
+    that is deliberate; this is the regression test for the dB path
+    existing at all, not just for its default-None fallback behaviour."""
+    assert ca.is_full_scale_volume(0.5, -1.0) is True  # scalar alone: False
+    assert ca.is_full_scale_volume(1.0, -10.0) is False  # scalar alone: True
+
+
+def test_is_full_scale_volume_falls_back_to_scalar_when_db_is_unavailable():
+    assert ca.is_full_scale_volume(1.0, None) is True
+    assert ca.is_full_scale_volume(0.9, None) is False
+
+
+def test_is_full_scale_volume_false_when_both_readings_are_unavailable():
+    assert ca.is_full_scale_volume(None, None) is False
+
+
+# ── has_non_stereo_formats ────────────────────────────────────────────────
+
+
+def test_has_non_stereo_formats_true_when_present():
+    formats = [ca.Format(48000.0, 24, 2), ca.Format(48000.0, 24, 6)]
+    assert ca.has_non_stereo_formats(formats) is True
+
+
+def test_has_non_stereo_formats_false_when_all_stereo():
+    formats = [ca.Format(44100.0, 24, 2), ca.Format(48000.0, 24, 2)]
+    assert ca.has_non_stereo_formats(formats) is False
+
+
+def test_has_non_stereo_formats_false_for_an_empty_list():
+    assert ca.has_non_stereo_formats([]) is False
+
+
 # ── find_g6: identify by capability fingerprint, not by name ────────────────
 
 
@@ -122,6 +196,110 @@ def test_refresh_available_formats_are_filtered_and_sorted():
     )
     state = ca.ClockController(hal=hal).refresh()
     assert state.available_formats == (ca.Format(44100.0, 24, 2), ca.Format(48000.0, 24, 2))
+
+
+# ── ClockController: output_volume ───────────────────────────────────────
+
+
+def test_refresh_reports_the_output_volume_when_present():
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.62)
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.output_volume == 0.62
+
+
+def test_refresh_reports_none_when_no_host_settable_volume_exists():
+    """A real, distinct case -- must not be reported as 0.0."""
+    hal = FakeHal(current_clock_source_code=0, output_volume=None)
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.output_volume is None
+
+
+def test_refresh_reports_a_full_scale_volume_reading():
+    hal = FakeHal(current_clock_source_code=0, output_volume=1.0)
+    state = ca.ClockController(hal=hal).refresh()
+    assert ca.is_full_scale_volume(state.output_volume) is True
+
+
+def test_refresh_reports_a_below_full_scale_volume_reading():
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.9)
+    state = ca.ClockController(hal=hal).refresh()
+    assert ca.is_full_scale_volume(state.output_volume) is False
+
+
+def test_refresh_does_not_populate_volume_when_device_not_found():
+    hal = FakeHal(present=False, output_volume=1.0)
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.found is False
+    assert state.output_volume is None
+
+
+# ── ClockController: output_volume_db ────────────────────────────────────
+
+
+def test_refresh_reports_the_output_volume_db_when_present():
+    hal = FakeHal(current_clock_source_code=0, output_volume_db=-1.5)
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.output_volume_db == -1.5
+
+
+def test_refresh_reports_none_db_when_vold_is_unreachable():
+    """The unverified-per-channel case this pass could not settle (see
+    coreaudio.py's module docstring) -- must read as a real absence, not 0 dB."""
+    hal = FakeHal(current_clock_source_code=0, output_volume_db=None)
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.output_volume_db is None
+
+
+def test_refresh_does_not_populate_volume_db_when_device_not_found():
+    hal = FakeHal(present=False, output_volume_db=-1.0)
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.found is False
+    assert state.output_volume_db is None
+
+
+def test_refresh_prefers_db_for_the_full_scale_decision_when_both_are_present():
+    """End-to-end version of the pure-function test above, through refresh():
+    a scalar that alone would not warn, paired with a dB reading that is
+    within 2 dB of full scale, must still warn once both are wired through
+    ClockState -- this is what would actually regress in the app if the dB
+    field were read but never threaded into the decision."""
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.5, output_volume_db=-1.0)
+    state = ca.ClockController(hal=hal).refresh()
+    assert ca.is_full_scale_volume(state.output_volume, state.output_volume_db) is True
+
+
+# ── ClockController: channel count / non-stereo reality check ───────────────
+
+
+def test_refresh_reports_the_current_output_channel_count():
+    hal = FakeHal(current_clock_source_code=0, current_format=ca.Format(48000.0, 24, 2))
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.output_channels == 2
+
+
+def test_refresh_reports_no_non_stereo_formats_when_only_stereo_is_offered():
+    hal = FakeHal(
+        current_clock_source_code=0,
+        formats_by_clock_source={0: [ca.Format(44100.0, 24, 2), ca.Format(48000.0, 24, 2)]},
+    )
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.non_stereo_formats_available is False
+
+
+def test_refresh_reports_non_stereo_formats_when_present_without_changing_the_dropdown_list():
+    """The reality-check fields must not change filter_stereo_pcm_formats()'s
+    own behaviour -- the Format dropdown stays stereo-only regardless."""
+    hal = FakeHal(
+        current_clock_source_code=0,
+        current_format=ca.Format(48000.0, 24, 2),
+        formats_by_clock_source={
+            0: [ca.Format(44100.0, 24, 2), ca.Format(48000.0, 24, 2), ca.Format(48000.0, 24, 6)],
+        },
+    )
+    state = ca.ClockController(hal=hal).refresh()
+    assert state.non_stereo_formats_available is True
+    assert state.output_channels == 2
+    assert all(f.channels == 2 for f in state.available_formats)
 
 
 # ── ClockController: set_clock_source() ──────────────────────────────────
@@ -356,6 +534,85 @@ def test_hal_reads_the_non_mixable_flag_from_a_real_style_asbd():
     FakeASBD.mFormatFlags = 0x0C
     fmt2 = hal._asbd_to_format(FakeASBD())
     assert fmt2.non_mixable is False
+
+
+# ── _CoreAudioHal.output_volume()/output_volume_db(): the real G6's
+# confirmed property shape ───────────────────────────────────────────────
+#
+# experimental/verify-coreaudio-volume.py against a real G6 (device 50, clock
+# sources DSP Clock / Stereo Direct) found: no 'vmvc', no master-element
+# 'volm' -- but 'volm' IS implemented on channels 1 and 2. These tests script
+# _has()/_get_raw() directly (same "skip framework loading" trick as
+# test_hal_reads_the_non_mixable_flag_from_a_real_style_asbd above) to prove
+# output_volume()'s element-fallback chain actually produces a reading
+# against exactly that shape, not just against FakeHal's simplified
+# single-value model (FakeHal has no concept of "which Core Audio element" --
+# that fallback logic lives entirely inside _CoreAudioHal).
+
+
+def _scripted_hal(properties: dict) -> ca._CoreAudioHal:
+    """A _CoreAudioHal with framework loading skipped and _has()/_get_raw()
+    scripted from a ``{(selector, scope, element): float_value}`` map. Any
+    (selector, scope, element) not in the map reads as "not implemented" --
+    mirrors AudioObjectHasProperty returning false for a property Core Audio
+    genuinely does not have.
+    """
+    import ctypes
+
+    hal = ca._CoreAudioHal.__new__(ca._CoreAudioHal)
+    hal.k_scope_global = ca._CoreAudioHal._fourcc("glob")
+    hal.k_scope_output = ca._CoreAudioHal._fourcc("outp")
+    hal.k_element_main = 0
+    hal.k_virtual_main_volume = ca._CoreAudioHal._fourcc("vmvc")
+    hal.k_volume_scalar = ca._CoreAudioHal._fourcc("volm")
+    hal.k_volume_decibels = ca._CoreAudioHal._fourcc("vold")
+
+    def _has(obj_id, selector, scope=None, element=None):
+        return (selector, scope, element) in properties
+
+    def _get_raw(obj_id, selector, size, scope=None, element=None):
+        return bytes(ctypes.c_float(properties[(selector, scope, element)]))
+
+    hal._has = _has
+    hal._get_raw = _get_raw
+    return hal
+
+
+def test_output_volume_falls_through_vmvc_and_master_volm_to_the_per_channel_reading():
+    """The real G6's confirmed shape: no 'vmvc', no master 'volm' -- reading
+    must still succeed via channel 1."""
+    hal = _scripted_hal({
+        (ca._CoreAudioHal._fourcc("volm"), ca._CoreAudioHal._fourcc("outp"), 1): 0.5625,
+    })
+    assert hal.output_volume(device_id=50) == pytest.approx(0.5625)
+
+
+def test_output_volume_returns_none_when_the_g6_shape_has_no_reading_anywhere():
+    hal = _scripted_hal({})  # vmvc absent, volm absent on every element
+    assert hal.output_volume(device_id=50) is None
+
+
+def test_output_volume_db_mirrors_the_same_element_fallback():
+    """Task 1's open question, exercised at the level this module can
+    actually test without a device attached: IF the G6 implements 'vold' on
+    channel 2 the same way it implements 'volm' there, output_volume_db()
+    finds it there too. Whether the G6 actually does is exactly what
+    experimental/verify-coreaudio-volume.py's extended probe (task 2) still needs
+    to confirm -- see the module docstring's "Still NOT validated" note."""
+    hal = _scripted_hal({
+        (ca._CoreAudioHal._fourcc("vold"), ca._CoreAudioHal._fourcc("outp"), 2): -1.5,
+    })
+    assert hal.output_volume_db(device_id=50) == pytest.approx(-1.5)
+
+
+def test_output_volume_db_returns_none_when_vold_is_absent_everywhere():
+    """The other real possibility this pass could not rule out: 'vold' simply
+    is not implemented at all, even where 'volm' is. Must read as absence,
+    not 0 dB."""
+    hal = _scripted_hal({
+        (ca._CoreAudioHal._fourcc("volm"), ca._CoreAudioHal._fourcc("outp"), 1): 0.5625,
+    })
+    assert hal.output_volume_db(device_id=50) is None
 
 
 # ── Regression: available_formats lags behind a clock source switch ─────────

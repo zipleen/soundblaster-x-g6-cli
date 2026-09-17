@@ -112,7 +112,9 @@ and leaves the system with no audio output until released, so:
 
 ### State
 
-The G6 cannot be read back. Initial widget values come from `api.get_model()`,
+The G6 cannot be read back. **Correction, 2026-09-17:** this was wrong —
+register-value readback is real and decoded; the app deliberately doesn't use
+it. See `docs/device-state.md`. Initial widget values come from `api.get_model()`,
 i.e. the persisted `~/.soundblaster-x-g6/g6.json`. With no file present,
 `G6Model()` defaults apply. The UI labels this honestly as last-known state
 rather than implying it queried the hardware. Writes go through `G6Api`, which

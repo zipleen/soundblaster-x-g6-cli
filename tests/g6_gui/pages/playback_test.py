@@ -4,7 +4,9 @@ import pytest
 
 from g6_cli.g6_spec import PlaybackFilter
 from g6_cli.g6_spec.decoder import DecoderMode
+from g6_gui import help as help_text
 from g6_gui.controller import G6Controller
+from g6_gui.filters import NON_OVERSAMPLING
 from g6_gui.pages import playback
 from tests.g6_gui.fake_api import FakeG6Api
 
@@ -54,6 +56,90 @@ async def test_filter_selection_sends_the_enum(built):
     assert api.calls == [
         ("playback_filter", {"playback_filter_enum": PlaybackFilter.SLOW_ROLL_OFF_LINEAR_PHASE})
     ]
+
+
+@pytest.mark.parametrize(
+    "label,expected_enum",
+    [
+        ("Fast Roll Off - Minimum Phase", PlaybackFilter.FAST_ROLL_OFF_MINIMUM_PHASE),
+        ("Slow Roll Off - Minimum Phase", PlaybackFilter.SLOW_ROLL_OFF_MINIMUM_PHASE),
+        ("Fast Roll Off - Linear Phase", PlaybackFilter.FAST_ROLL_OFF_LINEAR_PHASE),
+        ("Slow Roll Off - Linear Phase", PlaybackFilter.SLOW_ROLL_OFF_LINEAR_PHASE),
+    ],
+)
+async def test_the_four_original_filters_are_unchanged(built, label, expected_enum):
+    api, controller, content = built
+    content.filter.selection.value = label
+    await controller.flush()
+    assert api.calls == [("playback_filter", {"playback_filter_enum": expected_enum})]
+    # None of the four Creative-supported filters should ever show the NOS
+    # warning.
+    assert content.filter_warning.lines == []
+
+
+async def test_selecting_nos_sends_the_documented_wire_payload(built):
+    api, controller, content = built
+    content.filter.selection.value = "Non-Over-Sampling (NOS)"
+    await controller.flush()
+    assert api.calls == [
+        ("playback_filter", {"playback_filter_enum": NON_OVERSAMPLING})
+    ]
+    sent = api.calls[0][1]["playback_filter_enum"]
+    # The actual bytes fw_notes.md's "DAC FILTERS -- full decode" documents
+    # for NOS (SoundCore code 5, wire payload = code - 2 = 0003).
+    assert sent.value == bytes.fromhex("0003")
+
+
+def test_filter_warning_is_hidden_for_the_default_filter(built):
+    _, _, content = built
+    assert content.filter_warning.lines == []
+
+
+async def test_selecting_nos_shows_the_warning_and_switching_away_hides_it(built):
+    # Regression test for the warning wiring itself (HANDOFF.md gotcha 13:
+    # a test that passes whether or not the feature works is worthless). If
+    # the ``filter_warning.set_text(...)`` call were deleted from
+    # ``_on_filter_change``, ``content.filter_warning.lines`` would stay
+    # ``[]`` after selecting NOS and this would fail on the first assert. If
+    # the warning were shown unconditionally instead of only for NOS, it
+    # would still be present after switching back to a normal filter and
+    # this would fail on the second assert.
+    api, controller, content = built
+    content.filter.selection.value = "Non-Over-Sampling (NOS)"
+    await controller.flush()
+    assert content.filter_warning.lines != []
+    assert "Non-Over-Sampling is selected" in " ".join(content.filter_warning.lines)
+
+    content.filter.selection.value = "Fast Roll Off - Minimum Phase"
+    await controller.flush()
+    assert content.filter_warning.lines == []
+
+
+async def test_selecting_nos_does_not_revert_even_though_the_model_rejects_it(built):
+    # Drives the tolerate path through something that actually raises --
+    # standing in for G6Model.set_filter()'s isinstance check rejecting the
+    # NOS shim with a ValueError, which G6Api.playback_filter() only reaches
+    # *after* writing the correct bytes to the wire (see filters.py's
+    # docstring for the full chain). A double that silently accepted the
+    # shim would pass this test whether or not `tolerate` were wired up
+    # (HANDOFF.md gotcha 13); forcing a real raise means it only passes if
+    # `tolerate=(ValueError,)` is actually threaded through to submit().
+    api, controller, content = built
+    api.fail_next(ValueError("playback_filter_enum must be PlaybackFilter"))
+    content.filter.selection.value = "Non-Over-Sampling (NOS)"
+    await controller.flush()
+    assert content.filter.selection.value == "Non-Over-Sampling (NOS)"
+    assert content.filter_warning.lines != []
+
+
+async def test_selecting_a_normal_filter_still_reverts_on_a_genuine_failure(built):
+    api, controller, content = built
+    starting_label = content.filter.selection.value
+    api.fail_next(ValueError("genuinely rejected"))
+    content.filter.selection.value = "Slow Roll Off - Linear Phase"
+    await controller.flush()
+    assert content.filter.selection.value == starting_label
+    assert content.filter_warning.lines == []
 
 
 async def test_decoder_selection_sends_the_enum(built):

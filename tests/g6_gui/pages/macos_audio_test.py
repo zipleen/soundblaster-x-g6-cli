@@ -138,6 +138,154 @@ def test_status_includes_the_current_format(controller, monkeypatch):
     assert "24-bit" in text and "48" in text
 
 
+# ── Output volume ─────────────────────────────────────────────────────────
+
+
+def test_volume_is_shown_when_present(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.5)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    text = " ".join(page.volume_note.lines)
+    assert "50" in text
+    assert " ".join(page.volume_warning.lines) == ""
+
+
+def test_volume_absent_is_reported_distinctly_from_zero(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, output_volume=None)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    text = " ".join(page.volume_note.lines)
+    assert "0%" not in text
+    assert "not reported" in text.lower()
+
+
+def test_volume_at_full_scale_shows_the_distortion_warning(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, output_volume=1.0)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    assert "100" in " ".join(page.volume_note.lines)
+    assert "distort" in " ".join(page.volume_warning.lines).lower()
+
+
+def test_volume_below_full_scale_hides_the_warning(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.9)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    assert " ".join(page.volume_warning.lines) == ""
+
+
+def test_volume_and_channels_are_cleared_when_device_not_found(controller, monkeypatch):
+    _inject(monkeypatch, FakeHal(present=False))
+    page = macos_audio.build(controller)
+
+    assert " ".join(page.volume_note.lines) == ""
+    assert " ".join(page.volume_warning.lines) == ""
+    assert " ".join(page.channels_note.lines) == ""
+
+
+def test_refresh_button_re_reads_the_volume(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.5)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    # Something external changes the volume (e.g. the menu bar slider, used
+    # directly, outside of this app).
+    hal.output_volume_value = 1.0
+
+    page.refresh_button.on_press()
+
+    assert "100" in " ".join(page.volume_note.lines)
+    assert "distort" in " ".join(page.volume_warning.lines).lower()
+
+
+# ── Output volume: dB-preferred warning (task 1) ─────────────────────────
+
+
+def test_volume_note_includes_db_when_available(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.5625, output_volume_db=-1.5)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    text = " ".join(page.volume_note.lines)
+    assert "56" in text
+    assert "-1.5" in text and "dB" in text
+
+
+def test_volume_note_omits_db_when_unavailable(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.5, output_volume_db=None)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    text = " ".join(page.volume_note.lines)
+    assert "dB" not in text
+
+
+def test_warning_fires_from_db_even_when_the_scalar_alone_would_not_warn(controller, monkeypatch):
+    """The whole point of task 1: a scalar reading well under the old 0.99
+    bar can still be within ASR's -2 dBFS window on this non-linear control.
+    Reproduces the measured 'Mac mini Speakers' mapping style (a mid-range
+    scalar corresponding to a high dB) at a value close enough to the
+    threshold to matter."""
+    hal = FakeHal(current_clock_source_code=0, output_volume=0.6933, output_volume_db=-1.0)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    assert "distort" in " ".join(page.volume_warning.lines).lower()
+
+
+def test_warning_stays_silent_from_db_even_when_the_scalar_alone_would_warn(controller, monkeypatch):
+    """The other direction of the same fix: a scalar at the old full-scale
+    bar (>=0.99) must NOT warn once the dB reading shows real headroom --
+    trusting the finer instrument over the coarse one both ways."""
+    hal = FakeHal(current_clock_source_code=0, output_volume=1.0, output_volume_db=-10.0)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    assert " ".join(page.volume_warning.lines) == ""
+
+
+def test_warning_falls_back_to_the_scalar_when_db_is_unavailable(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, output_volume=1.0, output_volume_db=None)
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    assert "distort" in " ".join(page.volume_warning.lines).lower()
+
+
+# ── Channel count / non-stereo reality check ─────────────────────────────
+
+
+def test_channels_shows_the_expected_stereo_count(controller, monkeypatch):
+    hal = FakeHal(current_clock_source_code=0, current_format=ca.Format(48000.0, 24, 2))
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    assert "2" in " ".join(page.channels_note.lines)
+
+
+def test_channels_notes_when_a_non_stereo_format_is_also_offered(controller, monkeypatch):
+    hal = FakeHal(
+        current_clock_source_code=0,
+        current_format=ca.Format(48000.0, 24, 2),
+        formats_by_clock_source={
+            0: [ca.Format(44100.0, 24, 2), ca.Format(48000.0, 24, 2), ca.Format(48000.0, 24, 6)],
+        },
+    )
+    _inject(monkeypatch, hal)
+    page = macos_audio.build(controller)
+
+    text = " ".join(page.channels_note.lines)
+    assert "2" in text
+    assert "non-stereo" in text.lower()
+    # The format dropdown itself must stay stereo-only regardless -- the
+    # 6-channel entry above must not have made it into the offered formats.
+    assert len(page.format.selection.items) == 2
+
+
 def test_duplicate_looking_formats_are_both_genuinely_selectable(controller, monkeypatch):
     """Regression for the exclusive-mode duplicate bug: two entries with the
     same rate/bits but different mixability must both be present, distinct,

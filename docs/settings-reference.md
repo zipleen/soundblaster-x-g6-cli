@@ -1,28 +1,27 @@
 # What every setting actually does
 
 A reference for the options this GUI/CLI exposes on the Sound Blaster X G6:
-what each one changes, when it changes nothing at all, and how confident we are.
+what each one changes, when it changes nothing at all, and how confident we
+are. Written for two readers: someone deciding what to switch on, and someone
+writing UI help text. Each section ends with a **Help box** line short enough
+to drop into a tooltip; the wording lives in `src/g6_gui/help.py`, the single
+source shared with this document.
 
-Written for two readers: someone deciding what to switch on, and someone writing
-the help text for a UI tooltip. Every section ends with a **Help box** line short
-enough to drop straight into the UI.
+## Evidence markers
 
-## How to read the confidence markers
-
-| Marker | Meaning |
-|---|---|
-| **[bytes]** | Read directly out of the packets in `src/g6_cli/g6_spec/`. Not an opinion — this is what leaves the machine. |
-| **[Creative]** | Creative's own documentation or product pages. |
-| **[measured]** | Someone put it on a test bench. |
-| **[community]** | Consistent reports from forums. Plausible, not proof. |
-| **[inferred]** | Our reasoning from the bytes plus the above. Flagged wherever it appears. |
-| **[this Mac]** | Observed directly on Luis's own G6 (serial E5004E4F57X) on macOS. |
-| **[unknown]** | We could not establish it. Listed in [Open questions](#open-questions) with a test. |
+- **[TESTED]** — observed on real hardware by this project, with a date.
+- **[INFERRED]** — everything else: firmware disassembly, third-party
+  measurements, USB captures made by others, and plain reasoning. The source
+  is named inline, e.g. **[INFERRED]** (Audio Science Review measurement) or
+  **[INFERRED]** (firmware disassembly, g6-re).
 
 Two facts from [`device-state.md`](device-state.md) shape everything below:
-**there is no readback**, so every switch shows what was last *sent*, not what
-the device *is*; and the settings live in the G6's firmware, so they persist
-across reboots and across operating systems.
+this app **never reads the device back**, so every switch in the UI shows
+what was last *sent*, not what the device *is* — even though the control
+protocol itself does support reading a value back (see
+[Control protocol and readback](#control-protocol-and-readback)); and
+settings live in the G6's own firmware, so they persist across reboots and
+across operating systems.
 
 ---
 
@@ -30,17 +29,19 @@ across reboots and across operating systems.
 
 | Setting | What it changes | Works over USB on macOS? |
 |---|---|---|
-| Output (Speakers/Headphones) | Front headphone jack vs rear line/optical jack | Yes |
-| Direct Mode | One position of an `Audio Effects · Direct · SPDIF-Out Direct` radio — not a switch | **No — inert on macOS** (confirmed by ear). Controlled from the [macOS Audio tab](#this-app-now-controls-it-directly--the-macos-audio-tab) instead |
-| SPDIF-Out Direct Mode | Bypass for the optical output **only**; mutually exclusive with Direct Mode | **Unknown.** macOS has no equivalent setting, so it may well work — untested |
-| Filter | The DAC's reconstruction filter (4 variants) | Yes, but inaudible — see below |
+| Output (Speakers/Headphones) | Front headphone jack vs. rear line/optical combo jack | Yes |
+| Virtual 7.1 / 5.1 | Renders an 8-channel stream to binaural stereo inside the device's DSP | **No.** **[TESTED 2026-09-17]** Core Audio reports exactly 2 output channels and zero non-stereo formats. Works on Linux/Windows, where the OS opens the device with more channels |
+| Volume at 100% | Measurable distortion at full digital scale — a hardware limit present in every firmware release | N/A — applies on every OS |
+| Direct Mode | One position of an `Audio Effects · Direct · SPDIF-Out Direct` radio, not a switch. Device stops writing effect registers to the DSP | **No — inert.** **[TESTED 2026-09-16]** (confirmed by ear). macOS's Clock Source overrides it; use the [macOS Audio tab](#macos-audio-tab) instead |
+| SPDIF-Out Direct Mode | Same bypass, optical output only; mutually exclusive with Direct Mode on the device | **Unknown, untested** — macOS has no equivalent setting |
+| Filter | DAC reconstruction filter, 5 variants (1 hidden by Creative) | Yes, but inaudible except NOS |
 | Decoder mode | Dolby Digital dynamic-range compression | **No.** Needs a Dolby bitstream on optical in |
-| SBX profile | Picks which slot of `g6.json` you are editing | Yes — and **changing it already switches the profile** ([bug](#bug-changing-editing-profile-already-switches-the-profile)) |
-| SBX Surround / Crystalizer / Bass / Dialog Plus | Real-time DSP on playback | Yes |
-| SBX Smart Volume | Loudness levelling — slider **or** Night/"Loud", never both. ["Loud" is likely mislabelled](#smart-volume-and-smart-volume-special) | Yes |
-| Recording / Noise Reduction, AEC, Smart Volume | CrystalVoice mic processing | Yes |
-| Mic EQ + preset | An 8-band EQ on the mic path | Yes |
-| Volume / mute rows | USB Audio Class controls | **No** — macOS owns that interface |
+| SBX profile | Picks which slot of `g6.json` you're editing | Yes — and merely selecting a different profile already re-sends it to the device (bug, below) |
+| SBX Surround/Crystalizer/Bass/Dialog+ | Real-time playback DSP | Yes |
+| SBX Smart Volume | Loudness levelling — slider **or** Night/"Loud", never both | Yes |
+| Recording: Noise Reduction, AEC, Smart Volume | CrystalVoice mic processing | Yes (Smart Volume: **[TESTED 2026-09-16]** no audible effect) |
+| Mic EQ + presets | 8-band EQ on the mic path | Yes |
+| Volume/mute rows | USB Audio Class controls | **No** — macOS's kernel driver owns that interface |
 
 ---
 
@@ -48,233 +49,195 @@ across reboots and across operating systems.
 
 ## Output — Speakers / Headphones
 
-Picks which **physical jack** the G6 drives. On the hardware that is:
+Picks the physical jack the G6 drives:
 
 | UI label | Jack | What is on it |
 |---|---|---|
-| **Headphones** | Front 3.5 mm | Headphone out, driven by the Xamp. The front also carries the 3.5 mm mic input. |
-| **Speakers** | Rear 3.5 mm | Line Out **/ mini-TOSLINK Out combo jack** — the same socket is the optical output. |
+| **Headphones** | Front 3.5 mm | Xamp headphone out; also carries the 3.5 mm mic input |
+| **Speakers** | Rear combo jack | Line Out **and** mini-TOSLINK Out — the same socket |
 
-The rear panel is a pair of combo jacks: **Line Out / optical out**, and
-**Line In / optical in**, each accepting either a 3.5 mm analog plug or a
-mini-TOSLINK optical one. **[Creative]** So "Speakers" is the whole rear output
-path, analog *and* optical. The two halves are bypassed by different switches:
-[Direct Mode](#direct-mode) for the analog path, and
-[SPDIF-Out Direct Mode](#spdif-out-direct-mode) for the optical half only.
+**[INFERRED]** (Creative docs) The rear panel is a pair of combo jacks — Line
+Out/optical out, Line In/optical in — each taking a 3.5 mm plug or mini-TOSLINK.
+"Speakers" is the whole rear path, analog and optical; the two halves are
+bypassed independently by [Direct Mode](#direct-mode) (analog) and
+[SPDIF-Out Direct](#spdif-out-direct-mode) (optical only).
 
-**[bytes]** The two commands are genuinely different packets
-(`toggle_to_speakers` uses intermediate `0002`, headphones `0004`), each followed
-by a long replay of feature slots `0A`–`14`.
+**[INFERRED]** (source: `src/g6_cli/g6_spec`) `toggle_to_speakers`/`toggle_to_headphones`
+are genuinely different packets, each followed by a replay of feature slots
+`0A`–`14`. The 5.1/7.1 variants (`speakers_to_5_1()`, `speakers_to_7_1()`, and
+the headphone equivalents) are **byte-identical** to their stereo counterpart
+— upstream's own comment guesses the channel count is set OS-side, not on the
+device.
 
-The 5.1 and 7.1 variants in the CLI are worth knowing about: **[bytes]**
-`speakers_to_5_1()` and `speakers_to_7_1()` literally `return speakers_to_stereo()`.
-Upstream's own comment says Sound Blaster Command sends identical packets
-whatever channel count you pick, so the channel count is almost certainly set
-host-side through the OS, not on the device.
+**Help box:** Selects the physical output the G6 drives. Channel-count
+variants send identical bytes — the OS decides the channel count, not the
+device.
 
-**Help box:** Selects the physical output the G6 drives. Channel-count variants
-send identical bytes — the OS decides the channel count, not the device.
+## Virtual 7.1
+
+The G6 has exactly **two** analog output channels, always, regardless of
+"Stereo"/"5.1"/"7.1" selected anywhere in software. **[INFERRED]** (firmware
+disassembly, g6-re): in 7.1 mode the host streams 8 channels to the G6 over
+an ordinary USB Audio Class endpoint, and the G6's own onboard DSP (the
+"Malcolm"-controlled VT1728 chip) renders that down to a binaural stereo mix
+*inside the device*, using the same SBX/HRTF engine described in
+[`firmware-findings.md`](firmware-findings.md#6-hrtf-mode--what-it-is-and-why-this-app-doesnt-touch-it).
+Direct Mode disables this the same way it disables every other effect (see
+[Direct Mode](#direct-mode)): with the register-write gate closed, an
+8-channel stream gets only a fixed, non-adaptive downmix.
+
+**Why it doesn't work on macOS:** **[INFERRED]** (firmware disassembly,
+g6-re) the firmware does implement a `SetSpeakersConfig` command (vendor HID
+message 90, sub 7, carrying a channel mask) — but its payload has never been
+captured or decoded by anyone, and no tool in the ecosystem sends it.
+**[INFERRED]** (g6-re) on Windows the channel count lives in the audio
+driver's registry state (`KSAud_Device\SPeakerConfig`), a driver property
+rather than a HID write. **[INFERRED]** (reasoning) macOS has no equivalent
+knob at all: Core Audio derives channel count from the USB Audio Class
+descriptor, and no API lets an application ask for something different.
+**[TESTED 2026-09-17]** `experimental/verify-coreaudio-volume.py` against the
+real G6 confirms the outcome directly: current format `48000 Hz, 24 bit,
+2 channels`, **8 total formats enumerated, all 2-channel**,
+`has_non_stereo_formats()` returns `False`. The macOS Audio tab's **Output
+Channels** row is measured to read 2, not merely expected to.
+
+This is a *missing mechanism everywhere on macOS*, not something Linux has
+and macOS specifically withholds — distinct from the Mixer tab and
+volume/mute rows, which really are hidden by the AudioControl claim gate
+(`HANDOFF.md`); that gate is real but is not what stops 7.1.
+
+**This project's own flags are not a workaround.** **[INFERRED]** (source:
+`src/g6_cli/g6_spec/playback.py`):
+
+```python
+def speakers_to_7_1() -> list[UsbAudioData]:
+    ...
+    return speakers_to_stereo()
+```
+
+`speakers_to_7_1()`, `speakers_to_5_1()`, and the headphone equivalents all
+return the byte-identical stereo packet. Whether `--playback-speakers-to-7-1`
+changes anything on Linux is unconfirmed and, on the evidence of the bytes,
+doubtful. A genuine channel-count switch would most likely need to happen at
+the OS audio-stack level (telling ALSA/PipeWire to open the G6 as an
+8-channel sink), not through this packet. See the
+[Linux testing checklist](../LINUX-TESTING.md).
+
+**Open question:** does the G6 remember a 7.1 selection made on Windows or
+Linux, in a way macOS would then see (settings persist in firmware across
+OSes)? Untested — see [Open questions](#open-questions).
+
+**Help box:** Renders 8 channels to binaural stereo inside the G6's own DSP.
+Not available over USB on macOS — Core Audio has no way to ask any device for
+more than the channels its USB descriptor advertises, and the G6's descriptor
+is 2-channel on this platform.
 
 ## Direct Mode
 
-The single most misunderstood switch on the device — and this GUI models it
-wrongly, which is worth knowing before anything else.
+**Not a switch — one position of a radio group.** **[INFERRED]** (Creative,
+Connect 2): each output has an **Output Mode** radio — Headphones:
+`Audio Effects`/`Direct`; Speakers: `Audio Effects`/`Direct`/`SPDIF-Out
+Direct`. This app models it as **two independent booleans**, so it can
+represent `Direct=on, SPDIF-Out Direct=on`, a state the device can't hold
+(it silently picks one; this app never finds out, since it doesn't read the
+device back). The UI makes the two mutually exclusive to paper over the
+worst of it, but the real fix — one three-way selector, including the
+`Audio Effects` default this app's protocol capture never covered — is not
+done. Creative's Setup pages also carry two settings never captured here:
+**Configuration** (Stereo/5.1/7.1, both virtual) and **Apply Headphone
+Virtualization to** (`Headphones` or `Line and Optical Out`).
 
-### It is not a switch. It is one position of a radio group.
+**What it does [INFERRED, Creative]:** shuts the DSP down entirely — not
+"turn effects off," powers down the block that implements them: SBX
+(Surround, Crystalizer, Bass, Smart Volume, Dialog+), Scout Mode, the
+playback EQ, the predefined profiles, **microphone recording** (Creative's
+FAQ states this plainly — sidetone still works, which isn't proof the mic is
+recording), and What-U-Hear. Stereo-only, engaged on the device by holding
+**Scout Mode for 2 s** (Scout LED then blinks continuously). **The payoff:**
+32-bit/384 kHz PCM plus DSD64/128 over DoP (DSD is Windows-only, unsupported
+on macOS) — the CS43131 DAC is exactly a 32-bit/384 kHz part, so the limit
+without Direct Mode is the DSP in front of it, not the converter.
 
-**[Creative]** In Sound Blaster Connect 2, Direct Mode is not a checkbox. Each
-output has an **Output Mode** radio group, and Direct is one of its positions:
+**How much does it actually change?** Essentially nothing once effects are
+already off. **[INFERRED]** (ASR measurement + forum reports by ear): "makes
+no difference" once effects are off. Direct Mode is a statement about the
+G6's own internals, not the whole chain — it doesn't undo anything the host
+already applied (system EQ, Dolby Atmos for Headphones, a player's own DSP).
 
-| Output tab | Output Mode choices |
-|---|---|
-| **Headphones** | `Audio Effects` · `Direct` |
-| **Speakers** | `Audio Effects` · `Direct` · `SPDIF-Out Direct` |
+**Mechanism [INFERRED]** (firmware disassembly, g6-re): a RAM flag is checked
+before every effect-parameter write in the register-write dispatcher; on,
+the write is skipped entirely. Master volume lives in a separate register
+block the gate doesn't touch, so it keeps working. SPDIF-Out Direct
+additionally hard-switches the optical output's I²C registers to raw
+passthrough. This is why every effect vanishes at once and why it's enforced
+regardless of what software asks for — firmware refusing to send the data,
+not a cooperative setting a program could bypass. Flag addresses across
+firmware versions: [`firmware-findings.md`](firmware-findings.md#2-what-direct-mode-actually-does-inside-the-device).
 
-That single fact explains the mutual exclusivity the G5 article describes: they
-are not two switches that happen to conflict, they are **three states of one
-setting**. There is also a third state this GUI cannot express at all —
-`Audio Effects`, the normal/default mode.
+**Why it does nothing on macOS:** **[INFERRED]** (Creative FAQ) Direct Mode
+is set from **Audio MIDI Setup** on a Mac, not the device button, because
+macOS always controls an audio device's mode via the USB Audio Class clock
+selector and overwrites the device's own setting. **[TESTED 2026-09-16]**
+(by ear): switching Clock Source to *Stereo Direct* stops SBX doing
+anything; back to *DSP Clock* restores it. The GUI now disables this switch
+on macOS with a note pointing at the [macOS Audio tab](#macos-audio-tab),
+the same treatment the volume rows get.
 
-**This app exposes two independent booleans instead**, so it can represent
-`Direct = on, SPDIF-Out Direct = on`, which the device has no state for. The
-honest model would be a single three-way selector per output. **Not changed
-here.**
-
-Creative's Setup pages also carry two settings this project never captured:
-**Configuration** (Stereo / 5.1 / 7.1 — 5.1 and 7.1 are explicitly *virtual*
-outputs), and **Apply Headphone Virtualization to** (`Headphones` or `Line and
-Optical Out`) — the latter being the "Headphone Surround for Line/Optical Out"
-checkbox in the G5 article.
-
-**What it is meant to do [Creative][community]:** put the G6 into a bit-perfect
-path by shutting down the DSP entirely. Not "turn the effects off" — power down
-the block that implements them. Everything that touches the signal goes:
-
-- SBX (Surround, Crystalizer, Bass, Smart Volume, Dialog Plus)
-- Scout Mode
-- The playback equalizer
-- The pre-defined audio profiles
-- **Microphone recording [Creative]** — Creative's G6 FAQ states it plainly:
-  microphone recording is not available in Direct Mode. **Sidetone monitoring
-  still works**, which is a useful detail — hearing yourself is not proof the mic
-  is being recorded.
-- What-U-Hear **[Creative]** — also explicitly broken in Direct Mode.
-
-**Direct Mode is stereo-only [Creative]**, and on the device it is engaged by
-holding the **Scout Mode button for 2 seconds**; the Scout Mode indicator then
-**blinks continuously** to show you are in Direct Mode. That blink is the only
-honest status readout you have, since the protocol has no readback.
-
-**The sample-rate payoff [Creative]:** the G6 FAQ's own G5-vs-G6 table gives
-Direct Mode as **32-bit/384 kHz PCM**, plus **DSD64/DSD128 over DoP**. The DAC is
-a **Cirrus Logic CS43131 [measured]**, exactly a 32-bit/384 kHz part — the limit
-is the DSP in front of it, not the converter. **DSD is Windows-only: Creative
-states macOS does not support DSD playback.**
-
-**How much difference does it actually make?** Essentially none, if you already
-had the effects off. Amir at Audio Science Review tested the G6 dashboard with
-and without Direct Mode and reported that **"it makes no difference"** once the
-effects were turned off, adding that Creative kept the pipeline clean when
-features are disabled. **[measured]** Forum users with Beyerdynamic headphones
-report the same null result by ear. **[community]**
-
-**"Bit perfect" only covers the G6.** Direct Mode stops the *device* adding
-anything; it cannot undo what the host already did. Anything applied before the
-USB stream leaves the computer — Windows' Dolby Atmos for Headphones, macOS
-system EQ, a player's own DSP — still arrives at the DAC and still plays.
-**[community]** Direct Mode is a statement about the G6's internals, not about
-the whole chain.
-
-So the honest summary: Direct Mode is for unlocking >96 kHz and DSD, and for
-peace of mind. It is not a sound-quality upgrade over "all effects off".
-
-### Why this switch does nothing on macOS — answered
-
-Not a bug in this app, and not something a different packet would fix. Creative's
-G6 FAQ answers it directly **[Creative]**: to enable Direct Mode on a Mac you
-must change the DSP/Direct setting **from the Audio MIDI Setup menu**, not from
-the button on the G6 — because **macOS always controls the mode setting of any
-audio device, and overwrites the device's own setting.**
-
-That is the whole explanation. macOS asserts the mode through the USB Audio Class
-clock selector, continuously. Whatever this app writes over HID, Core Audio
-overrides it. So on macOS:
-
-- The **Direct Mode switch in this GUI is inert**, and so is the 2-second
-  button-hold on the device itself.
-- The real control is **Audio MIDI Setup → Clock Source**. See
-  [the macOS section](#macos-audio-midi-setup-is-the-real-control) below.
-- Your observation — SBX audible regardless of this switch — is exactly what the
-  documentation predicts. You had Clock Source set to *DSP Clock*, so the DSP was
-  in the path no matter what.
-
-**Confirmed by ear [this Mac].** Switching Audio MIDI Setup to *Stereo Direct*
-makes the SBX controls stop doing anything; switching back to *DSP Clock* brings
-them back. That is Direct Mode working correctly — just not through this app.
-
-This also means the switch should probably be **disabled with an explanatory note
-on macOS**, the way the volume rows already are. Not changed here.
-
-**Help box:** Shuts down the entire DSP for a bit-perfect path, and unlocks
+**Help box:** Shuts down the entire DSP for a bit-perfect path; unlocks
 32-bit/384 kHz and DSD. Disables SBX, Scout, the EQ, mic recording and
-What-U-Hear (sidetone survives). **On macOS this switch does nothing** — macOS
-overrides the device's mode; use Audio MIDI Setup → Clock Source instead. With
-effects already off it is measurably identical to normal mode.
+What-U-Hear (sidetone survives). **On macOS this switch does nothing** —
+use the macOS Audio tab's Clock Source instead. With effects already off, it
+is measurably identical to normal mode.
 
 ## SPDIF-Out Direct Mode
 
-**[bytes]** Structurally the same command as Direct Mode with one field changed:
+**[INFERRED]** (source: `src/g6_cli/g6_spec`) Structurally the same command
+as Direct Mode with one field changed (target `0005` vs. `000d`) — same
+opcode, same commit packet. **[INFERRED]** (Creative KB 128701, *G5: Direct
+Mode versus SPDIF-Out Direct*): Direct Mode gives bit-perfect stereo playback
+(192 kHz on the G5, 384 kHz on the G6); SPDIF-Out Direct gives bit-perfect
+optical output up to 24-bit/96 kHz (S/PDIF's ceiling, not the device's); the
+two are **mutually exclusive** in Creative's own UI. Behaviour, with
+Windows' default playback device set to Speakers:
 
-```
-Direct Mode        5a 3903 0005 <01|00> 00000000 …
-SPDIF-Out Direct   5a 3903 000d <01|00> 00000000 …
-                            ^^^^
-```
-
-Same opcode, same commit packet, different target selector.
-
-**[Creative]** Creative's knowledge-base article *Direct Mode versus SPDIF-Out
-Direct* (Solution ID 128701) documents this for the **Sound BlasterX G5**, the
-G6's immediate predecessor. Its three key statements:
-
-- **Direct Mode** gives direct playback to the stereo speaker channel, at up to
-  192 kHz on the G5 (384 kHz on the G6, which has the better DAC).
-- **SPDIF-Out Direct** allows bit-to-bit streaming of up to **24-bit/96 kHz PCM**
-  to the optical output, without processing. That 96 kHz ceiling is S/PDIF's, not
-  the device's.
-- **They are mutually exclusive.** Enabling either one automatically disables the
-  other. The article shows the checkbox greying out in Creative's own UI.
-
-### The behaviour table
-
-This is the part worth memorising — it is more specific than "bypasses the DSP",
-and it corrects the obvious guess. From Creative's own table, with Windows'
-default playback device set to Speakers:
-
-| Direct Mode | SPDIF-Out Direct | Headphone / Line Out | Optical Out |
+| Direct Mode | SPDIF-Out Direct | Headphone/Line Out | Optical Out |
 |---|---|---|---|
-| off | off | plays, **with** effects | plays, **with** effects |
-| **on** | off | plays, **no** effects | **silent** |
-| off | **on** | plays, **with** effects | plays, **no** effects, and **the G5 can no longer control its volume** |
+| off | off | plays, with effects | plays, with effects |
+| **on** | off | plays, no effects | **silent** |
+| off | **on** | plays, with effects | plays, no effects, **volume no longer controllable** |
 
-Three things fall out of that:
+Three consequences: Direct Mode **kills optical output entirely**, not just
+bypasses it; SPDIF-Out Direct only touches the optical output — *not*
+"Direct Mode for the rear jack," the analog half keeps its effects; and it
+hands volume control to the receiver (no digital scaling left to apply).
+**[INFERRED]** (Creative G6 FAQ) confirms the middle/bottom rows for the G6
+itself; the G5's 192 kHz becomes 384 kHz on the G6's analog side, and
+"volume uncontrollable via G5" is **[INFERRED]** (extended by analogy) to
+the G6 for the same bit-perfect reason, not separately confirmed. Because
+the two are mutually exclusive on the device but ship as two independent UI
+booleans, the app makes them mutually exclusive too, so `g6.json` can't
+record a state the hardware can't hold. Creative's screenshots also show a
+third advanced setting, **Headphone Surround for Line/Optical Out**, never
+captured here.
 
-1. **Direct Mode kills the optical output entirely.** Not "passes it through
-   unprocessed" — no sound at all. If you ever run optical, this is the switch
-   that will make you think the device broke.
-2. **SPDIF-Out Direct is narrow.** It only touches the optical output. The analog
-   Headphone/Line Out keeps its effects. So it is *not* "Direct Mode for the rear
-   jack" — the rear jack's analog half is unaffected.
-3. **SPDIF-Out Direct hands volume control to the receiver.** Bit-perfect means no
-   digital volume scaling, so the G6's knob stops affecting the optical stream.
-   Expected, and alarming if you do not know it.
-
-**Confirmed for the G6 [Creative].** The article above covers the G5, but the
-G6's own FAQ states the same rule in its own words: the optical output *does*
-carry audio processing and SBX effects in normal mode, and does *not* once
-SPDIF-Direct is selected. So the middle and bottom rows of that table apply to
-the G6 as written. The G5-specific part is the 192 kHz figure — the G6 does
-384 kHz on the analog side — and the "volume cannot control via G5" wording,
-which is **[inferred]** to hold for the G6 for the same bit-perfect reason.
-
-### One consequence for this GUI
-
-Because the two are mutually exclusive on the device but are **two independent
-switches in this UI**, you can put both on. The G6 will silently turn one off,
-this app will never know (no readback), and `g6.json` will record a state the
-hardware is not in. Worth making them mutually exclusive in the UI. Not changed
-here.
-
-Creative's screenshots also show a third advanced setting, **Headphone Surround
-for Line/Optical Out**, which this project does not expose at all — it was never
-captured in the protocol work.
-
-### About S/PDIF itself
-
-Worth correcting a common figure: TOSLINK is not limited to 256 kbit/s. Consumer
-S/PDIF carries roughly 3 Mbit/s, which is enough for **2-channel PCM up to
-24-bit/96 kHz**, or a compressed multichannel bitstream — Dolby Digital at up to
-640 kbit/s, DTS at up to 1.5 Mbit/s. What it cannot carry is uncompressed
-multichannel PCM, which is why 5.1 over optical always means a compressed
-bitstream.
-
-So the intuition is right for the wrong reason: two-channel PCM over optical
-beats Dolby Digital 5.1 over optical on raw fidelity, because one is lossless and
-the other is a lossy codec — not because of a bandwidth ceiling.
-
-The G6's optical in and out share the rear combo jacks with Line In and Line Out
-**[Creative]**, and the optical out supports up to 5.1 channels. It decodes Dolby
-Digital; it does **not** do Dolby Digital Live *encoding* **[community]**, so it
-cannot turn your Mac's stereo or multichannel PCM into a 5.1 bitstream for a
-receiver. Optical out from a Mac therefore means 2-channel PCM.
+**About S/PDIF bandwidth:** TOSLINK isn't limited to 256 kbit/s — consumer
+S/PDIF carries ~3 Mbit/s, enough for 2-channel PCM up to 24-bit/96 kHz or a
+compressed multichannel bitstream (Dolby up to 640 kbit/s, DTS up to
+1.5 Mbit/s), but not uncompressed multichannel PCM — why 5.1 over optical
+always means a lossy bitstream, and 2-channel PCM beats it on fidelity
+because one is lossless, not because of bandwidth. **[INFERRED]** (Creative)
+the G6's optical out supports up to 5.1 and decodes Dolby Digital but does
+**not** encode it, so a Mac's PCM output can never become a bitstream for a
+receiver.
 
 **Help box:** The same DSP bypass as Direct Mode, applied to the optical
-(S/PDIF) output path instead of the analog one. Only relevant if something is
-plugged into the optical out.
+(S/PDIF) output only. Only relevant if something is plugged into the optical
+out; mutually exclusive with Direct Mode on the device.
 
-## Filter — the four reconstruction filters
+## Filter — five reconstruction filters, including a hidden one
 
-**[bytes]** Four values, sent as the target field of opcode `6c03`:
+**[INFERRED]** (source: `src/g6_cli/g6_spec`, opcode `6c03`) Four values are
+visible in Creative's own app:
 
 | Label | Bytes |
 |---|---|
@@ -283,354 +246,296 @@ plugged into the optical out.
 | Fast Roll Off — Linear Phase | `0004` |
 | Slow Roll Off — Linear Phase | `0005` |
 
-These are the **CS43131's built-in interpolation filters [measured]**, not a
-Creative invention. Cirrus documents the part as offering selectable responses
-combining fast/slow roll-off with linear/minimum-phase behaviour. Two independent
-axes:
+These are the **CS43131's built-in interpolation filters** **[INFERRED]**
+(Cirrus datasheet), not a Creative invention, combining two axes: **roll-off**
+(fast holds flat response to near 20 kHz then cuts hard; slow slopes earlier
+and gentler, trading top-octave flatness for less ringing) and **phase**
+(linear rings symmetrically — a small pre-echo before transients,
+time-coherent; minimum puts ringing after the transient — no pre-echo,
+frequency-dependent group delay). Default **[INFERRED]** (community): Fast
+Roll Off — Minimum Phase. These "4 roll off filters" are **[INFERRED]**
+(Creative FAQ) a G6-only addition — the G5 has none.
 
-- **Roll-off** — how sharply the filter cuts just below Nyquist. *Fast* holds
-  flat response to nearly 20 kHz then cuts hard; *slow* starts sloping earlier
-  and cuts gently, trading a little top-octave flatness for less ringing.
-- **Phase** — where the filter's ringing goes. *Linear phase* rings symmetrically,
-  so there is a small pre-echo *before* each transient, and it is time-coherent
-  across frequency. *Minimum phase* puts all the ringing after the transient —
-  no pre-echo, at the cost of frequency-dependent group delay.
+### The fifth filter — Non-Over-Sampling (NOS), hidden by Creative
 
-**Default [community]:** Fast Roll Off — Minimum Phase.
+**[INFERRED]** (g6-re, live testing on their own hardware, not this
+project's): querying the CS43131 through Creative's SoundCore layer enumerates
+**five** filter modes on a real G6, not four — the fifth is NOS, a real,
+fully-supported silicon mode (Cirrus datasheet §5.9). **[INFERRED]** (g6-re,
+decompiled `BaseFiltersPageViewModel.InitializeSetupDACFilter`) Creative's own
+Windows app hard-skips the filter entry named `"NonOverSampling"` **by name**
+when building the list — nothing about NOS is broken or firmware-gated, the
+GUI code just doesn't offer it. **[INFERRED]** (g6-re + bytes) the wire
+command matches this project's capture format: `5A 6C 03 00 <payload>` +
+commit `5A 6C 01 01`, payload = SoundCore filter code minus 2. The four
+visible filters are `0001`/`0002`/`0004`/`0005`; **NOS is payload `0003`** —
+the one value never seen in upstream's own captures.
 
-**[Creative]** The G6 FAQ's G5-vs-G6 comparison lists "4 roll off filters" as a
-G6 addition — the G5 has none at all. So this control is genuinely part of what
-you paid for, even if the audible result is what follows.
+**What NOS does** on a delta-sigma DAC: bypasses the digital interpolation
+filter, so output is a zero-order-hold rather than a reconstructed waveform.
+**[INFERRED]** (DSP reasoning): no pre-ringing, minimum delay (the appeal);
+passband droop (~−3.2 dB at 20 kHz at 44.1 kHz, worse at lower rates, better
+at higher); and unfiltered images above Nyquist (inaudible directly, but
+present unlike with every other filter). NOS is measurably the worst of the
+five on droop and imaging, and also a legitimate listening-taste preference —
+likely why Creative ships it in silicon/firmware but hides it in the app.
 
-Creative's own description is almost content-free — Connect 2's Filters page says
-only that it controls the roll-off frequencies, with four options for the
-steepness of the transition. No frequency response curves, no guidance on which
-to pick. The DAC datasheet is the better source, which is why this section leans
-on it.
+This app exposes NOS as a fifth option (`src/g6_gui/filters.py`) with a
+warning. Because `PlaybackFilter` is an upstream-frozen enum this project's
+rules forbid editing, NOS is a shim object mimicking the one attribute the
+send path reads (`.value == bytes.fromhex("0003")`) rather than a real enum
+member. The HID write happens correctly either way, but the separate
+model-persistence step checks `isinstance(..., PlaybackFilter)` and raises on
+the shim — so with model persistence on (default), selecting NOS is expected
+to apply on the device, then error, revert the dropdown, and **not** save to
+`g6.json`. Only `--no-persist` avoids this. Whether the device-side write
+survives that error path is untested — see [Open questions](#open-questions).
 
-### Which one for a DT 990 PRO, DT 880 or DT 770?
+### Picking one, practically
 
-Honest answer: **it does not matter, pick any and stop thinking about it.**
+It doesn't matter for a DT 990 PRO, DT 880, or DT 770 — the entire
+difference lives above ~18 kHz and in impulse ringing tens of dB below
+signal, while the headphones differ by 10+ dB through the treble. If a rule
+helps: **Slow Roll Off — Minimum Phase** has no pre-ringing and the gentlest
+top end; **Fast Roll Off — Linear Phase** is the measurement-correct,
+flattest-to-20kHz choice; stock **Fast Roll Off — Minimum Phase** is fine if
+you'd rather not think about it. A bigger lever is the G6's **gain switch**
+(physical, not software): the DT 990 PRO, DT 880 (250 Ω) and any 600 Ω
+variant want high gain, the 80 Ω DT 770 doesn't. **[INFERRED]** (ASR
+measurement + Creative): 85 mW into 300 Ω on high gain, ~1 Ω output
+impedance — all three comfortably driven.
 
-The entire difference between these four lives in the top half-octave — above
-roughly 18 kHz — and in the pre/post-ringing of a single impulse at a level
-tens of dB below the signal. For scale: your three Beyerdynamics differ from each
-other by *ten-plus dB* through the treble, and the DT 990's 8–10 kHz peak is
-itself around +10 dB. The filter choice moves things by a fraction of a dB in a
-region where the headphone is already doing something dramatic, and where most
-adults cannot hear at all.
-
-If you want a rule anyway:
-
-- **Slow Roll Off — Minimum Phase** — no pre-ringing at all, gentlest top end.
-  The "least filter" option, and the one worth trying first on the DT 990, whose
-  treble peak is the sharpest of the three.
-- **Fast Roll Off — Linear Phase** — the measurement-correct choice: flattest to
-  20 kHz, time-coherent. What most desktop DACs default to.
-- Leave it on the stock Fast Roll Off — Minimum Phase if you would rather not
-  think about it. Nothing is broken.
-
-A far bigger lever for all three headphones is the G6's **gain switch** (a
-physical switch on the device, not exposed in software). The DT 990 PRO and
-DT 880 at 250 Ω, and any 600 Ω variant, want **high gain**; the 80 Ω DT 770 does
-not. The G6 drives 85 mW into 300 Ω on high gain **[measured]** and has ~1 Ω
-output impedance **[Creative]**, so all three are comfortably driven.
-
-**Help box:** Picks the DAC's reconstruction filter. Differences are confined to
-above ~18 kHz and to impulse ringing — inaudible on essentially any headphone.
-Slow Roll Off / Minimum Phase rings least; Fast Roll Off / Linear Phase measures
-flattest.
+**Help box:** Picks the DAC's reconstruction filter. Differences among the
+first four are confined to above ~18 kHz and impulse ringing — inaudible on
+essentially any headphone. Slow Roll Off/Minimum Phase rings least; Fast Roll
+Off/Linear Phase measures flattest. Non-Over-Sampling is a fifth filter the
+device supports but Creative's app hides — offered here, with a warning.
 
 ## Decoder mode — Full / Normal / Night
 
-This is **Dolby Digital Dynamic Range Control**, and it is why you hear nothing
-when you change it.
+This is **Dolby Digital Dynamic Range Control**, which is why changing it is
+usually silent. **[INFERRED]** (Creative specs/Connect 2) the G6 decodes
+Dolby Digital via Optical In; the knob sweeps Full → Normal → Night.
+**[INFERRED]** (bytes) the three values are float32 `0000803F`/`00000040`/
+`00004040` = 1.0/2.0/3.0, the knob's three detents in order.
 
-**[Creative]** Confirmed twice over: the G6 technical specifications list Dolby
-Digital Decoding as *"Yes (via Optical In)"* — the optical qualifier is Creative's
-own — and Connect 2's Dolby page is a single knob sweeping **Full → Normal →
-Night**, described as Dynamic Range Control for Dolby Digital media.
+- **Full** — no compression, mastered dynamic range.
+- **Normal** — moderate compression, standard listening.
+- **Night** — heavy compression: quiet dialogue up, loud peaks down.
 
-**[bytes]** The three values are float32, and they are exactly the knob's three
-detents — 1.0, 2.0, 3.0 in knob order:
+**Why it does nothing on macOS (or Windows over USB):** DRC is a parameter of
+the Dolby decoder itself, active only while actually decoding a Dolby Digital
+bitstream arriving on the **optical input**. macOS sends the G6 plain PCM
+over USB — no decoder in the path, nothing for the setting to modify. Not
+broken, not macOS-specific. **[INFERRED]** (Creative): to exercise it, feed a
+Dolby Digital source to the optical input — e.g. a PS4 (USB to the G6 for
+chat, optical from the console for game audio, console output set to
+digital/optical) or an Xbox. A Mac cannot produce a Dolby Digital bitstream
+over USB, so no USB-only setup ever exercises this.
 
-| Label | Bytes | As float32 |
-|---|---|---|
-| Full | `0000 803F` | 1.0 |
-| Normal | `0000 0040` | 2.0 |
-| Night | `0000 4040` | 3.0 |
-
-**[Creative]** Creative describes the integrated Dolby decoder's Dynamic Range
-Control as letting you tailor how wide the swing between loud and quiet passages
-is, on a scale from Full through Normal to Night.
-
-- **Full** — no compression. The full dynamic range as mastered: explosions loud,
-  whispers quiet.
-- **Normal** — moderate compression, the standard listening setting.
-- **Night** — heavy compression. Quiet dialogue pulled up, loud peaks pulled
-  down, so you can watch a film at 11pm without riding the volume knob.
-
-**Why it does nothing on your Mac:** dynamic range control is a parameter *of the
-Dolby Digital decoder*. It applies only while the G6 is actually decoding a Dolby
-Digital bitstream, which on this device means a DD stream arriving at the
-**optical input**. macOS sends the G6 plain PCM over USB. No Dolby decoder in the
-path, nothing for the setting to modify. The packet is sent and accepted; it
-simply has no work to do.
-
-It is not broken, and it is not macOS-specific — it would do nothing over USB on
-Windows either.
-
-**[Creative]** Dolby Digital decoding is one of the headline G6-over-G5 upgrades:
-the FAQ's comparison table lists it as *Yes* for the G6 and *No* for the G5. So
-the decoder is real hardware, it simply needs feeding.
-
-**How to actually feed it [Creative]:** connect a Dolby Digital source to the
-optical **input**. Creative's documented example is a PS4 — USB to the G6 for
-chat, optical from the console for game audio, with the console's Primary Output
-Port set to digital/optical. An Xbox connects optical-out to the G6's optical-in.
-A Mac cannot produce a Dolby Digital bitstream over USB, so no USB-only setup
-will ever exercise this.
-
-**Help box:** Dynamic-range compression for the built-in Dolby Digital decoder.
-Full = untouched, Night = quiet parts raised and loud parts tamed. Only has any
-effect while decoding a Dolby Digital bitstream from the optical input — it does
-nothing for PCM over USB.
+**Help box:** Dynamic-range compression for the built-in Dolby Digital
+decoder. Full = untouched, Night = quiet parts raised and loud parts tamed.
+Only has any effect while decoding a Dolby Digital bitstream from the optical
+input — does nothing for PCM over USB.
 
 ## Audio interface — Mute, Volume, Channels
 
-Standard USB Audio Class controls. **[bytes]** Volume is sent as a signed 16-bit
-value in 1/256 dB units, the USB-AC convention: 100% is `0x0000` (0 dB), 50% is
-−10.3 dB, 0% is −64 dB. That is why the steps are coarse (10% increments) and why
-the scale sounds logarithmic rather than linear.
-
-**Hidden on macOS.** These live on the AudioControl interface, which macOS's
-kernel audio driver owns and will not release. See [`gui.md`](gui.md).
+**[INFERRED]** (bytes) Standard USB Audio Class controls; volume is a signed
+16-bit value in 1/256 dB units (100% = 0x0000/0 dB, 50% = −10.3 dB, 0% =
+−64 dB), hence the coarse 10% steps and the log-feeling scale. **Hidden on
+macOS**: these live on the AudioControl interface, which macOS's kernel audio
+driver owns and will not release (see [`gui.md`](gui.md)).
 
 ---
 
 # macOS: Audio MIDI Setup is the real control
 
-The most important thing to know about running a G6 on a Mac, and the answer to
-"why does Direct Mode do nothing?".
+**[INFERRED]** (Creative FAQ): on a Mac you change the DSP/Direct setting
+from **Audio MIDI Setup**, not the device's button, because macOS always
+controls an audio device's mode and overwrites the device's own setting. The
+G6 is plug-and-play on macOS via Apple's stock USB audio driver — Creative
+ships no Mac software at all.
 
-**[Creative]** Creative's G6 FAQ: on a Mac you change the DSP/Direct setting from
-the **Audio MIDI Setup** menu rather than with the button on the G6, because
-**macOS always controls the mode setting of any audio device and overwrites the
-device's own setting**. The G6 is plug-and-play on macOS, driven by Apple's stock
-USB audio driver, and Creative ships no Sound Blaster Command for it.
+## Clock Source — DSP Clock vs. Stereo Direct
 
-Open **Audio MIDI Setup** (`/Applications/Utilities/`), select the G6, and you
-get two rows that matter.
+Core Audio's "Clock Source" is normally about timing in a multi-device rig;
+Creative overloads it as two internal signal paths:
 
-## Clock Source — DSP Clock vs Stereo Direct
+| Clock Source | Path | Rates **[TESTED 2026-09-16]** | Effects |
+|---|---|---|---|
+| **DSP Clock** | Through the DSP | up to 32-bit/**48 kHz** | SBX, Scout, EQ all available |
+| **Stereo Direct** | Straight to DAC | up to 32-bit/**384 kHz** | none — this *is* Direct Mode |
 
-Normally a Core Audio "Clock Source" picks which device supplies timing in a
-multi-device rig. Creative overloads it: on the G6 the two clock sources are two
-**internal signal paths**, and picking one selects the mode.
+**`Stereo Direct` is how you turn Direct Mode on under macOS** — not this
+app's switch, not the device's button. **[INFERRED]** (community reports on
+the Sound Blaster E5 and a later Creative DAC) the same naming and the same
+48 kHz DSP-mode ceiling on macOS appear on sibling Creative devices.
 
-| Clock Source | Path | Channels | Rates observed **[this Mac]** | Effects |
-|---|---|---|---|---|
-| **DSP Clock** | Through the DSP | Stereo | up to 32-bit / **48 kHz** | SBX, Scout, EQ all available |
-| **Stereo Direct** | Straight to the DAC | Stereo only | up to 32-bit / **384 kHz** | none — this *is* Direct Mode |
+**Gotcha, TESTED on this Mac:** with the format at 32-bit/384 kHz under
+Stereo Direct, switching back to DSP Clock breaks audio — DSP Clock can't do
+384 kHz and Core Audio won't renegotiate for you. Recovery: switch back to
+Stereo Direct → set the format to something DSP Clock supports (2 ch/24-bit/
+48 kHz) → *then* switch to DSP Clock. **Drop the sample rate before changing
+clock source, not after.**
 
-**So `Stereo Direct` is how you turn Direct Mode on under macOS.** Not the switch
-in this app, not the button on the device.
+## macOS Audio tab
 
-**[community]** The same two names appear on other Creative DACs — reports on the
-Sound Blaster E5 describe switching its clock source between Stereo Direct and
-DSP Clock in Audio MIDI Setup for exactly this reason — and a reviewer of a later
-Creative DAC records the same 48 kHz ceiling in DSP mode on macOS while only
-direct mode reaches 32-bit/384 kHz. Your G6 behaves identically.
+The **macOS Audio** tab (first tab in the GUI, since this is the actual
+Direct Mode control here) reads and writes Clock Source and Format through
+the same public Core Audio API Audio MIDI Setup itself uses
+(`AudioObjectGetPropertyData`/`SetPropertyData` on
+`kAudioDevicePropertyClockSource`/`kAudioStreamPropertyPhysicalFormat`), and
+automates the switch-back handoff above so this app cannot wedge the device.
+**[INFERRED]** (read from this machine's Xcode SDK headers, not memory) —
+`kAudioObjectPropertyName` is `'lnam'`, not the `'name'` a guess would
+produce. It identifies the G6 **not by name** but by scanning for the one
+device whose Clock Source options are exactly `{"DSP Clock", "Stereo
+Direct"}` — the one fact Creative's docs confirm for certain about this
+device; anything else greys the tab out with an explanation rather than
+guessing. Switching **to DSP Clock** above 48 kHz auto-drops the format to
+48 kHz (preferring 24-bit) before touching the clock source, reproducing the
+manual recovery above in code. **[TESTED 2026-09-16]** (BlackHole and the
+built-in devices, **not** the G6): picking the wrong fallback (lowest rate, not 48 kHz
+specifically) was an actual bug caught validating this against real Core
+Audio, before real G6 hardware was available.
 
-### Gotcha: switching back from 384 kHz can wedge the device
+### Confirmed against the real G6
 
-**[this Mac]** With the format set to 32-bit/384 kHz under *Stereo Direct*,
-switching Clock Source back to *DSP Clock* breaks audio — DSP Clock cannot do
-384 kHz, and Core Audio does not renegotiate the format for you. The recovery is:
+**[TESTED 2026-09-16]** Core Audio calls the device exactly `Sound BlasterX
+G6`; fingerprint identification (built to not depend on that name) found it
+anyway, with clock sources spelled precisely `"DSP Clock"`/`"Stereo Direct"`.
+The full flow works end to end — detects the device, reads real Clock
+Source/Format, switches between the two, disables Recording/SBX the moment
+Stereo Direct is confirmed, and picks up changes made in Apple's own Audio
+MIDI Setup via Refresh. DSP Clock's format list is capped at 48 kHz
+(8 entries); Stereo Direct offers 32, up to 384 kHz. **[TESTED 2026-09-17]**,
+precisely, via `experimental/verify-coreaudio-volume.py`: on DSP Clock, 44.1
+and 48 kHz × 24/32-bit × ordinary/`(Exclusive)` = 8 entries, all 2-channel
+(this run didn't re-switch to Stereo Direct, so the 32-entry figure is from
+2026-09-16 and expected to still hold).
 
-1. Switch back to **Stereo Direct**.
-2. Set the format to something DSP Clock supports — **2 ch, 24-bit, 48 kHz**.
-3. *Now* switch to **DSP Clock**. Effects return.
+**A real discovery, TESTED 2026-09-16:** the format list wasn't just large —
+every (rate, bit depth) combination appeared twice. Read as raw
+`AudioStreamBasicDescription` structs, they're genuinely different: one
+ordinary, one with `kAudioFormatFlagIsNonMixable` set (Core Audio exclusive
+mode, locking the device to one application) — also a bug in this app's tab,
+whose `Format` type compared (rate, bits, channels) only, so picking the
+second silently resolved to the first. Fixed by tracking the flag; the
+exclusive variant is labelled `(Exclusive)` and independently selectable.
 
-So: **drop the sample rate before changing clock source**, not after.
+**Settle timing, TESTED 2026-09-16 — real hardware behaviour, not a bug:**
+`current_clock_source` flips within ~20 ms of a switch; the separate
+available-format-list property lags 100–200 ms — the tab now waits for the
+format list to change before finishing a switch. Separately, most switches
+settle under 300 ms, but the identical operation twice took over a second
+with no identifiable pattern — unexplained, still open (see [Open
+questions](#open-questions)); the settle-poll budget is generous (several
+seconds) because of it, at no UI cost since the wait never blocks the main
+thread.
 
-## This app now controls it directly — the macOS Audio tab
+**Cross-tab effect:** Recording and SBX auto-disable whenever this tab
+confirms Stereo Direct (both drive the DSP over HID, which Stereo Direct
+bypasses), stay enabled on DSP Clock, and — deliberately — stay enabled when
+the clock source can't be positively identified, since ambiguous shouldn't
+count as evidence of Stereo Direct (`_apply_clock_source_gate` in `app.py`,
+`coreaudio.py`). The 48 kHz DSP-path cap matters: Creative's non-Direct
+marketing figure is 96 kHz, but on macOS the DSP path tops out at 48 kHz —
+above that you give up every effect, no middle setting.
 
-The gotcha above used to be something you had to do by hand in Apple's Audio
-MIDI Setup. It no longer is: a **macOS Audio** tab in this GUI reads and writes
-the G6's Clock Source and Format directly, through the same public Core Audio
-API Audio MIDI Setup itself uses (`AudioObjectGetPropertyData` /
-`AudioObjectSetPropertyData` on `kAudioDevicePropertyClockSource` and
-`kAudioStreamPropertyPhysicalFormat`), and automates the switch-back handoff
-above so it cannot wedge the device from inside this app.
-
-**[bytes]**, in the same evidentiary sense the rest of this document uses that
-tag — not USB HID bytes this time, but the exact FourCC property selectors and
-struct layouts, read directly out of this machine's Xcode SDK headers
-(`AudioHardware.h`, `AudioHardwareBase.h`, `CoreAudioBaseTypes.h`), not from
-memory. `kAudioObjectPropertyName` in particular is `'lnam'`, not the `'name'`
-a first guess would produce — confirmed by checking the header rather than
-trusting recall, exactly the discipline the rest of this document tries to
-hold itself to.
-
-### How it identifies the G6
-
-Not by name. Nothing in this codebase has confirmed what Core Audio actually
-calls the G6 — it was unplugged while this was built. Instead, the tab scans
-every audio device Core Audio reports and picks out the one whose Clock Source
-options are exactly `{"DSP Clock", "Stereo Direct"}` — the one fact confirmed
-for certain, from Creative's own documentation, about this specific device.
-Anything that does not match that exact shape (extra clock sources, only one
-of the two, different names entirely) is treated as *not found* and the tab
-greys out with an explanation, rather than guessing at an unfamiliar
-configuration. This was an explicit part of the request this was built for —
-support the G6's own two modes, nothing more elaborate.
-
-### The safe handoff, automated
-
-Switching **to DSP Clock** while the current rate exceeds 48 kHz now
-automatically drops the format to 48 kHz first (preferring 24-bit if the
-device offers it there, otherwise whatever bit depth it does offer at
-48 kHz) — reproducing, in code, the exact manual recovery above — before
-touching the clock source at all. Confirmed to matter, not theoretical:
-picking the *wrong* fallback (the lowest available rate rather than 48 kHz
-specifically) was an actual bug caught while validating this against real
-Core Audio, before it ever reached this document.
-
-### Confirmed against the real G6 — no longer a guess
-
-The section above documented this before hardware was available. It has since
-been plugged in and this feature tried against it directly, so the following
-is no longer "should work" — it is what actually happened.
-
-**[this Mac]** Core Audio calls the device exactly `Sound BlasterX G6` (visible
-in `system_profiler SPAudioDataType` once connected). The fingerprint-based
-identification — deliberately built to *not* depend on knowing that name —
-found it correctly regardless, and its clock sources are spelled precisely
-`"DSP Clock"` and `"Stereo Direct"`, exactly as this document assumed from
-Creative's documentation.
-
-**[this Mac]** The full flow works end to end: the tab detects the device,
-reads the real current Clock Source and Format, switches between DSP Clock and
-Stereo Direct, and Recording/SBX disable themselves correctly the moment
-Stereo Direct is confirmed active. Changing the clock source in Apple's own
-Audio MIDI Setup, outside this app entirely, is also picked up correctly here
-— confirmed by switching there and pressing Refresh.
-
-**[this Mac]** DSP Clock's real format list is capped at 48 kHz, exactly as
-documented — 8 entries. Stereo Direct offers 32, up to 384 kHz.
-
-#### A real discovery: the G6 offers two variants of every format
-
-The G6's available-format list was not simply large — it contained what first
-looked like duplicate entries: two of every (bit depth, sample rate)
-combination. Read as raw `AudioStreamBasicDescription` structs rather than
-through the simplified view this tab originally used, they turned out to be
-genuinely different: one ordinary, and one with
-`kAudioFormatFlagIsNonMixable` set — Core Audio's *exclusive mode*, which
-bypasses its mixer entirely so no other application can share the device while
-it is active. This is a real, meaningful option for bit-perfect playback, not
-a bug in the G6's own format table.
-
-It **was** a bug in this tab, though: the `Format` type used to compare
-(rate, bits, channels) only, so the two variants were indistinguishable —
-identical labels in the dropdown, and picking the second of a pair silently
-resolved back to the first every time. Fixed by tracking the flag explicitly;
-the exclusive variant is now labelled `(Exclusive)` and is a genuinely
-separate, selectable option.
-
-#### Settle timing is real hardware variance, not a bug
-
-Two things were confirmed live and are worth relying on as documented
-behaviour rather than treating as flakiness to chase further:
-
-- **The Clock Source and the Format list update on different schedules.**
-  `current_clock_source` flips within about 20ms of a switch; the stream's
-  *available*-format list — a separate Core Audio property — lags behind by
-  roughly 100-200ms before it reflects the new clock source. The tab now
-  explicitly waits for the format list to actually change before finishing a
-  clock-source switch, rather than returning with the old list still showing.
-- **How long a switch takes is inconsistent.** Most settle in well under
-  300ms. The same operation, run repeatedly with nothing else different, was
-  twice observed to take over a second. No pattern predicted which attempts
-  would be slow — not the direction, not whether another switch had just
-  completed. This is treated as real, unexplained hardware/driver variance:
-  the settle-poll budget is generous (several seconds) precisely because of
-  this, and it costs nothing in practice since the wait never blocks the UI
-  thread.
-
-**The honest confidence level now:** working, live, on the actual hardware —
-this is no longer a mechanism-only validation with an open question about the
-device. What remains genuinely open is documented below.
-
-### Cross-tab effect
-
-Recording and SBX are automatically disabled whenever this tab confirms Clock
-Source is Stereo Direct — both drive the G6's DSP over its USB HID protocol,
-which Stereo Direct bypasses entirely, so they would send commands that do
-nothing. They stay enabled whenever the clock source is DSP Clock, and,
-deliberately, whenever it cannot be positively identified at all — an
-ambiguous read is not treated as evidence of Stereo Direct, since disabling
-tabs on a guess would be worse than leaving them alone. See
-[coreaudio.py](../src/g6_gui/coreaudio.py) and `_apply_clock_source_gate` in
-[app.py](../src/g6_gui/app.py).
-
-The 48 kHz cap is worth dwelling on: Creative's marketing figure for non-direct
-playback is 96 kHz, but **on macOS the DSP path tops out at 48 kHz**. If you want
-anything above 48 kHz on a Mac, you must give up every effect. There is no
-middle setting.
+**What Clock Source does *not* cover:** Creative's Output Mode is three-way
+(`Audio Effects`/`Direct`/`SPDIF-Out Direct`); macOS's is two-way, mapping to
+the first two. **There is no macOS equivalent of SPDIF-Out Direct**, so
+"macOS overrides Direct Mode" doesn't extend to it — macOS may have no
+opinion and let this app's HID packet through, untested. That's why the GUI
+disables Direct Mode on macOS but leaves **SPDIF-Out Direct enabled**:
+untested isn't broken, and disabling it would remove the only way to find
+out (needs something plugged into the optical output).
 
 ## Format — bit depth and sample rate
 
-The second row picks the stream format from whatever the current clock source
-allows. Two things worth knowing:
+Higher is not better here: 24-bit/48 kHz matches the overwhelming majority of
+source material, 384 kHz is not audibly different on a DT 990
+**[TESTED 2026-09-16]** (by ear), and ASR could not *measure* a difference between
+Direct Mode and normal mode with effects off **[INFERRED]** (ASR). 24-bit
+already covers ~144 dB of dynamic range, beyond both the G6's 130 dB DAC and
+any listening room — more bit depth buys nothing audible. The genuine reasons
+to pick Stereo Direct are DSD (unsupported on macOS at all) and hi-res files
+you actually own; otherwise DSP Clock at 24-bit/48 kHz with effects on is the
+better trade on a Mac.
 
-- **Higher is not better here.** 24-bit/48 kHz is a perfectly sensible choice; it
-  matches the overwhelming majority of source material, and you will not hear the
-  difference at 384 kHz. You already confirmed as much on the DT 990
-  **[this Mac]** — and Audio Science Review could not *measure* a difference
-  between Direct Mode and normal mode with effects off. **[measured]**
-- **Bit depth beyond 24 buys nothing audible.** 24-bit already covers ~144 dB of
-  dynamic range, far beyond both the G6's 130 dB DAC and any listening room.
+## Full-scale volume — the G6 distorts at 100%
 
-The genuine reasons to choose Stereo Direct are DSD playback (**not supported on
-macOS at all [Creative]**) and hi-res files you actually own. Otherwise DSP Clock
-at 24-bit/48 kHz, with the effects you like, is the better trade on a Mac.
+The macOS Audio tab shows the G6's current output volume and warns at 100%.
 
-## What this means for this app
+**[INFERRED]** (Audio Science Review, 2019 bench measurement): real,
+measurable low-frequency distortion at full digital scale — THD+N approaching
+1% at 20 Hz at 0 dBFS — that dropping the level by exactly 2 dB removed
+entirely, taking SINAD from ~107 dB to ~112 dB. ASR's diagnosis was analog:
+the G6 is bus-powered over USB and likely short of supply headroom driving
+the DAC at full-scale low-frequency peaks. **[INFERRED]** (firmware
+disassembly, g6-re): every DSP/DAC gain and drive constant — master-gain
+ladder, headphone gain-patch tables, profile gain tables, boot parameters —
+is **byte-identical across all five public firmware releases, 2019–2025**;
+no headroom-trim constant was added in six years. Full comparison:
+[`firmware-findings.md`](firmware-findings.md#1-the-full-scale-distortion-issue--real-old-and-permanent).
 
-- The **Direct Mode switch does nothing on macOS.** macOS re-asserts the mode
-  continuously, so the HID packet is overridden. The switch should probably be
-  disabled with a note pointing at Audio MIDI Setup — the way the volume rows
-  already are. **Not changed here.**
-- Everything else on the HID interface **does** work: output switching, filter,
-  decoder, lighting, mic boost, Voice Clarity, and all of SBX. That is worth
-  stating plainly, because Creative's FAQ claims there is "no customization of
-  Acoustic Engine features" on Mac — true of *their* software, since they never
-  shipped a Mac app, but not of the device. This project drives those features
-  over HID on macOS and they work. **[this Mac]**
-- If you select **Stereo Direct**, expect the SBX tab to stop having any audible
-  effect, and mic recording to stop working. That is the device behaving
-  correctly, not the app failing.
+**What this means:** the distortion at 100% is a permanent hardware property
+of every G6 on every firmware version — an analog power-supply headroom
+limit firmware can't fix, and won't be patched. **The fix, unchanged since
+2019:** keep the volume a couple of steps below 100% (~90% is comfortably
+clear) before the signal reaches the DAC. This app can't change your system
+volume, but shows the current level and warns at 100%. **Unverified:**
+nobody has run a THD+N measurement against this project's own G6, or any G6
+on macOS specifically — the reasoning rests on the constants being
+unchanged, not a fresh measurement.
 
-## What the clock source does *not* cover
+### Volume forwards to the device, not the host
 
-Worth being precise, because it is easy to over-generalise (this document did,
-in an earlier revision).
+**[TESTED 2026-09-17]**, via `experimental/verify-coreaudio-volume.py`: the
+macOS volume slider for the G6 moves a real hardware volume control inside
+the device, not a host-side software gain:
 
-Creative's own Output Mode is a **three-way** choice — `Audio Effects`,
-`Direct`, `SPDIF-Out Direct`. macOS's Clock Source offers only **two** positions,
-DSP Clock and Stereo Direct. Those map onto the first two.
+```
+'vmvc' (VirtualMainVolume)              not implemented
+'volm' output/main                      not implemented
+'volm' output/ch1                       0.5625
+'volm' output/ch2                       0.5625
+'vold' output/main                      not implemented
+'mute' output/main                      0.0000
+```
 
-**There is no macOS equivalent of SPDIF-Out Direct.** So the conclusion that
-macOS overrides Direct Mode does *not* automatically extend to it: macOS may
-simply have no opinion about that third state and let this app's HID packet
-through. Nobody has tested it, and it cannot be tested without something plugged
-into the optical output.
+Core Audio's `'volm'`/`'mute'` are a passthrough to the G6's own USB Audio
+Class descriptor, which advertises a hardware volume control on the output
+terminal — the same control Windows' volume mixer and Connect 2 would move.
+**Closed.** **A portability gotcha:** the G6 implements volume **only per
+output channel** (elements 1/2 above), never on the master/main element, and
+doesn't implement `'vmvc'` at all — code that only checks the main element
+or `'vmvc'` will wrongly conclude the G6 has no volume control. This app's
+`coreaudio.py` already reads/writes per-channel for this reason; the
+measurement confirms that was correct against real hardware, not just
+BlackHole. Whether a per-channel `'vold'` also exists wasn't probed —
+**[unknown]**.
 
-That is why the GUI **disables Direct Mode on macOS but leaves SPDIF-Out Direct
-enabled**. Untested is not the same as broken, and disabling the switch would
-have removed the only means of ever finding out.
+**Still open: where inside the G6 does attenuation happen** — digitally
+before the CS43131 DAC, or in the analog stage after it (the Xamp, or an
+attenuator ahead of it)? This decides whether lowering volume genuinely
+reduces what the DAC/analog stage handle (consistent with ASR's −2 dB
+finding) or only reduces something after an already full-scale DAC output
+(less consistent). **[INFERRED]** (reasoning, not measured): the practical
+advice — a couple of steps below 100% — holds either way, since it matches
+ASR's supply-sag diagnosis regardless of where in the chain the reduction
+happens; reasoning from the outcome, not a measurement of the signal path.
+What would settle it: `docs/g6-re/tools/thd_test.py`, a THD+N script g6-re
+prepared but deliberately never ran, at multiple volume settings with a
+loopback cable — nobody has run it on any G6.
+
+**What this means for the app on macOS:** Direct Mode's switch does nothing
+(disabled with a note); everything else on the HID interface works — output
+switching, filter, decoder, lighting, mic boost, CrystalVoice, all of SBX —
+**[TESTED 2026-09-16]**, despite Creative's FAQ claiming no Acoustic Engine
+customization on Mac (true of *their* software, not the device); selecting
+Stereo Direct correctly kills SBX's audible effect and mic recording —
+device behaviour, not app failure.
 
 **Help box:** On macOS, Direct Mode is selected in Audio MIDI Setup → Clock
 Source, not here. *DSP Clock* keeps all effects and caps at 48 kHz; *Stereo
@@ -640,50 +545,51 @@ Direct* is Direct Mode — bit-perfect to 384 kHz, no effects, no mic recording.
 
 # Hardware facts worth having
 
-**[Creative]**, from the G6 technical specifications (SID 200065):
+**[INFERRED]** (Creative technical specifications, SID 200065):
 
 | | |
 |---|---|
-| Model / DSP | SB1770 / **SB-Axx1** audio processor |
-| DAC | Cirrus Logic CS43131 **[measured]**, 130 dB SNR/DNR |
-| Headphone amp | Xamp Discrete HP Bi-Amp, **1 Ω** output impedance |
-| Headphones supported | **16 – 600 Ω** |
-| Dolby Digital decoding | **Yes — via Optical In** |
-| DSD over PCM | DSD64, DSD128 — **Direct Mode only**, and not on macOS |
-| Playback (Direct Mode) | 16/24/32-bit at 44.1 / 48 / 88.2 / 96 / 176.4 / 192 / 352.8 / **384 kHz** |
-| Recording | up to 32-bit/192 kHz, Line In, Optical In and Mic In alike |
-| Jacks | Line In + mini-TOSLINK In combo · Line Out + mini-TOSLINK Out combo · Headphone/Headset · Ext Mic In · USB |
-| macOS driver | **Apple's in-box audio driver** — Creative ships none |
+| Model / DSP | SB1770 / SB-Axx1 audio processor |
+| DAC | Cirrus Logic CS43131, 130 dB SNR/DNR |
+| Headphone amp | Xamp Discrete HP Bi-Amp, 1 Ω output impedance |
+| Headphones supported | 16 – 600 Ω |
+| Dolby Digital decoding | Yes — via Optical In |
+| DSD over PCM | DSD64, DSD128 — Direct Mode only, not on macOS |
+| Playback (Direct Mode) | 16/24/32-bit at 44.1/48/88.2/96/176.4/192/352.8/384 kHz |
+| Recording | up to 32-bit/192 kHz, Line In/Optical In/Mic In alike |
+| Jacks | Line In+optical In combo · Line Out+optical Out combo · Headphone/Headset · Ext Mic In · USB |
+| macOS driver | Apple's in-box driver — Creative ships none |
 
-All three of your Beyerdynamics sit comfortably inside 16–600 Ω. Note the two
-*separate* front jacks: Headphone/Headset and Ext Mic In.
+All three of your Beyerdynamics (DT 990 PRO, DT 880, DT 770) sit comfortably
+inside 16–600 Ω. Note the two *separate* front jacks: Headphone/Headset and
+Ext Mic In.
 
-**On Windows**, reaching 32-bit/384 kHz is the same idea as on macOS but through
-a different dialog **[Creative]**: set the G6's speaker configuration to
-**Stereo**, then pick *32 bit, 384000 Hz (Studio Quality)* as the Default Format
-in the playback device's properties. Note what is *not* in those instructions —
-any mention of toggling a Direct Mode switch. On both operating systems, the
-high-rate stereo path is entered by choosing the format in the OS.
+**[INFERRED]** (Creative KB 200066) On Windows, reaching 32-bit/384 kHz uses
+the same idea as macOS through a different dialog: set speaker configuration
+to Stereo, then pick *32 bit, 384000 Hz (Studio Quality)* in the playback
+device's format properties — no Direct Mode switch involved. On both OSes,
+the high-rate stereo path is entered by choosing the format in the OS.
 
 # The physical controls
 
-Not software, but you cannot reason about the device without them — and with no
-readback, the LEDs are the only status you get. **[Creative]**
+Not software, but the only status this app gives you at all, since it
+doesn't read the device back. **[INFERRED]** (Creative):
 
 | Action | Control | Result |
 |---|---|---|
-| Toggle Scout Mode | Press the Scout Mode button | Scout Mode on/off |
-| Toggle Direct Mode | **Hold** Scout Mode for 2 s | Scout indicator **blinks continuously** while in Direct Mode (ignored on macOS) |
-| Toggle Sidetone | **Hold** the volume knob for 2 s | Knob LED white → red; side icon headphone → mic. Blinking white = sidetone muted |
-| Gain | Physical switch | Set it for your headphone impedance — high gain for 250 Ω+ |
-| **Factory reset** | **Hold Scout Mode + volume knob together for 5 s** | The 3 side LEDs cycle. **Erases every saved setting in the G6.** |
+| Toggle Scout Mode | Press Scout Mode button | Scout Mode on/off |
+| Toggle Direct Mode | Hold Scout Mode 2 s | Scout LED blinks continuously (ignored on macOS) |
+| Toggle Sidetone | Hold volume knob 2 s | Knob LED white→red, icon headphone→mic; blinking white = muted |
+| Gain | Physical switch | High gain for 250 Ω+ headphones |
+| **Factory reset** | Hold Scout Mode + volume knob 5 s | 3 side LEDs cycle; **erases every saved setting** |
 | Soft reset | Unplug USB, wait 3 s, replug | Recovers an unresponsive card |
 
-**The factory reset is the most useful thing on this list.** Because there is no
-readback, this app can drift out of sync with the hardware and you have no way to
-compare. A factory reset is the one way to force a known state — after which
-`g6.json`'s assumed defaults and the device genuinely agree. Note it also wipes
-lighting and everything else.
+**Factory reset is the most useful entry on this list**: it's the only way to
+force a known state that `g6.json`'s assumed defaults can agree with, since
+this app can drift out of sync with the hardware with no way to compare (the
+protocol does support a register readback, this app just doesn't use it —
+see [below](#control-protocol-and-readback)). It also wipes lighting and
+everything else.
 
 ---
 
@@ -691,101 +597,52 @@ lighting and everything else.
 
 ## Profiles — Gaming / Music / Cinema / Special
 
-The one section where the UI is honestly misleading, and the code says so plainly.
+**[INFERRED]** (source: `src/g6_cli/g6_spec`) `sbx_toggle()`/`sbx_slider()`
+build packets from the feature and value only — `profile_name` never reaches
+the wire. **The G6 has exactly one live SBX state.** The four profiles also
+ship empty (`Profile.init()` calls `SBX.default()` for all four: every
+effect off, every slider at 50, no Smart Volume special) — no factory
+Gaming/Cinema voicing is captured anywhere in this codebase. **[INFERRED]**
+(Creative FAQ): BlasterX Acoustic Engine and SBX Pro Studio share core
+algorithms; the Acoustic Engine's addition is preset/customisable profiles,
+including game-tuned ones — Connect 2 ships 20 (Gaming, Music, Movie,
+Adventure and Action, FPS, RPG, RTS, Driving Simulation, Stadium, and 11
+title-specific ones). None of that content exists here; this project's four
+names (Gaming/Music/Cinema/Special) are a local abstraction borrowing three
+of Creative's names — Creative has *Movie*, not *Cinema*, and nothing called
+*Special*.
 
-**[bytes]** `sbx_toggle()` and `sbx_slider()` build their packets from the audio
-feature and the value **only**. The `profile_name` argument never reaches the
-wire. The G6 has exactly one live SBX state.
-
-**[bytes]** And the four profiles ship empty. `Profile.init()` calls
-`SBX.default()` for all four, which is identical every time: every effect off,
-every slider at 50, Smart Volume special `None`. There are no factory Gaming or
-Cinema voicings in this codebase — Creative's own software has preset content,
-but none of it was captured here.
-
-**[Creative]** For context on what is missing: the G6 FAQ explains that BlasterX
-Acoustic Engine and SBX Pro Studio share the same core algorithms, and that the
-Acoustic Engine's addition is exactly the **preset and customisable profiles** —
-including professionally tuned ones for specific games. Connect 2 ships **20**
-of them — Gaming, Music, Movie, Adventure and Action, FPS, RPG, Real Time
-Strategy, Driving Simulation, Stadium, and eleven title-specific ones (CS:GO,
-DOTA 2, Overwatch, PUBG, The Witcher 3, Rocket League, Project CARS, League of
-Legends, Arena of Valor, Call of Duty, Metal Gear Solid V). Predefined profiles
-cannot be deleted, only reverted; custom ones can be added.
-
-**None of that content exists here.** Note also that this project's four names
-are its own: Creative has *Movie*, not *Cinema*, and nothing called *Special*.
-The four slots are a local abstraction that happens to borrow three of Creative's
-names, which is why they start empty.
-
-So what a profile really is: **a named row in `g6.json` recording what you last
-set**. Consequences:
-
-- Editing a profile that is not the active one is **audible immediately** — the
-  bytes go straight to the single live SBX state.
-- Those edits are saved under the profile you were editing.
-- `sbx_profile_switch()` is the only bulk replay in the codebase: it walks the
-  chosen profile's saved values and re-sends them all. That is the moment your
-  edits to other profiles get overwritten.
-
-The SBX tab already warns about this. Worth keeping.
+So a "profile" is really just a **named row in `g6.json` recording what you
+last set**: editing a non-active profile is audible immediately (bytes go to
+the single live SBX state), the edit saves under the profile you were
+editing, and `sbx_profile_switch()` — the only bulk replay in the codebase —
+walks the target profile's saved values and resends them all, overwriting
+your other edits. The SBX tab warns about this.
 
 ### Bug: changing "Editing profile" already switches the profile
 
-**[bytes][measured]** Confirmed and reproduced, without touching the device.
+**[INFERRED]** (bytes, reproduced without touching real hardware via the fake
+API): picking a different profile in the **Editing profile** dropdown is
+supposed to just repoint the controls at another slot, sending nothing. It
+doesn't. `on_editing_change` repopulates every control by assigning
+`.value`, and on the Cocoa/Toga backend, assigning `.value` **fires
+`on_change`** whenever the new value differs from the old
+(`toga_cocoa/widgets/switch.py`) — so each control that actually changed
+submits to the device. Reproduced with the fake API: making Cinema differ
+from Gaming in four values, then selecting Cinema in the dropdown, produces
+four device writes from an action that should send nothing.
 
-Picking a different profile in the **Editing profile** dropdown is supposed to be
-a pure UI action — repoint the controls at another slot, send nothing. It does
-not work that way on macOS.
-
-`on_editing_change` repopulates every control from the newly selected profile:
-
-```python
-row.toggle.switch.value = getattr(sbx, toggle_getter)()
-row.slider.slider.value = getattr(sbx, slider_getter)()
-```
-
-On the Cocoa backend, assigning `.value` **fires `on_change`**:
-
-```python
-# toga_cocoa/widgets/switch.py
-def set_value(self, value):
-    old_value = self.native.state == NSOnState
-    self.native.state = NSOnState if value else NSOffState
-    if self.interface.on_change and value != old_value:
-        self.interface.on_change()          # ← fires on a programmatic set
-```
-
-So each repopulated control submits to the device. Reproduced with the fake API:
-building the SBX page, making Cinema differ from Gaming in four values, then
-setting the dropdown to `Cinema`, produces **four device writes** —
-`sbx_toggle`/`sbx_slider` for surround and bass — from an action that should send
-nothing.
-
-Note `value != old_value`: only controls whose value actually *differs* fire.
-That is why the effect scales with how different the two profiles are, and why it
-is invisible when they match.
-
-**Consequences**
-
-- Your observation is exactly right: the sound changes the moment you pick a
-  different profile, so **"Switch to this profile" appears to do nothing.**
-- The button is not *entirely* redundant. It still calls `sbx_profile_switch()`,
-  which re-sends every value and — importantly — records the newly selected
-  profile in `g6.json` and updates the banner. The audio has already moved; the
-  button makes the bookkeeping agree.
-- The safety property the SBX tab's warning relies on ("editing another profile
-  is audible but does not switch you") is therefore **not** what happens. Merely
-  browsing profiles rewrites the live SBX state.
-
-**Why the tests never caught it:** the suite asserts on `FakeG6Api` calls, and
-with the default model **all four profiles are identical**, so `value !=
-old_value` is never true and nothing fires. A regression test needs profiles that
-actually differ.
-
-**Fix sketch** (not applied): guard `on_editing_change` with a reentrancy flag
-that suppresses submits while repopulating — the same shape as the existing
-re-entry guard in `slider_row`'s snap handler.
+**Consequences:** the sound changes the moment you browse profiles, so
+"Switch to this profile" *appears* to do nothing — but it's not fully
+redundant, since it still records the newly selected profile in `g6.json`
+and updates the banner (bookkeeping catching up with audio that already
+moved). The SBX tab's implied safety property — "editing another profile is
+audible but doesn't switch you" — is therefore false; merely browsing
+profiles rewrites the live SBX state. Missed by tests because the default
+fake-API model has all four profiles identical, so the `value != old_value`
+guard never fires; a regression test needs profiles that actually differ.
+**Fix sketch, not applied:** a reentrancy flag on `on_editing_change`,
+matching the guard already used in `slider_row`'s snap handler.
 
 **Help box:** Profiles are slots in this app's own file, not presets on the
 device. The G6 has one live SBX state, so editing any profile is heard
@@ -793,530 +650,325 @@ immediately; switching profiles replays that slot's saved values over it.
 
 ## How Creative's own UI presents these five
 
-**[Creative]** Worth knowing, because this GUI presents all five identically —
-an on/off switch plus a 0–100 slider — and Connect 2 does not:
+**[INFERRED]** (Creative, Connect 2) this GUI presents all five identically
+(on/off + 0–100 slider); Connect 2 does not — it folds "off" into the bottom
+of three knobs instead of a separate switch. **[INFERRED]** (bytes) the
+protocol has both a toggle slot and a slider slot for all five, so this app
+isn't inventing controls. To roughly match Creative's detents: 0/50/100 for
+Surround, 0/33/66/100 for Dialog+ (whether the firmware interpolates or
+snaps to the nearest detent is **[unknown]**):
 
-| Effect | Creative's control | Separate on/off? |
-|---|---|---|
-| Surround | knob: **Normal · Wide · Ultra Wide** | no — *Normal* is the low end |
-| Crystalizer | knob **0–100** | **yes** |
-| Bass | knob **0–100** | **yes** |
-| Smart Volume | knob: **Off · Auto · Night** | no — *Off* is the low end |
-| Dialog+ | knob: **Off · Normal · Balanced · Dialog Focus** | no — *Off* is the low end |
+| Effect | Creative's control | What it does **[INFERRED, Creative unless noted]** | Help box |
+|---|---|---|---|
+| **Surround** | Normal·Wide·Ultra Wide (no separate on/off) | HRTF-based virtual surround over two channels. **[INFERRED]** (community): good for positional cues in games with a real surround source, less useful on stereo music. | Widens the stage and places sounds around you from a multichannel source. Effective for games, less so for stereo music. |
+| **Crystalizer** | 0–100 + on/off | An expander with a treble tilt restoring detail lost to lossy compression; adds bite to films/games/streams. Easy to overdo on a bright headphone like the DT 990 PRO. | Re-expands dynamics and sharpens transients to counter compression artefacts. Audible immediately; go easy on bright headphones. |
+| **Bass** | 0–100 + on/off | Fuller, deeper low end via added harmonics, not just level. | Bass enhancement — adds depth and harmonic weight to the low end. |
+| **Dialog Plus** | Off·Normal·Balanced·Dialog Focus (no separate on/off) | Analyses centre-channel/dialogue content and lifts the vocal band via filtering and a frequency/time-domain algorithm, so speech sits above the mix and room noise. | Lifts voices and dialogue above the rest of the mix. Useful for films with buried dialogue. |
 
-**[bytes]** The protocol has a toggle slot *and* a slider slot for all five, so
-this app is not inventing the extra switches — Creative simply chooses not to
-show three of them, folding "off" into the bottom of the knob instead.
-
-The practical read: for **Surround** and **Dialog+**, your 0–100 slider is a
-finer-grained version of a control Creative ships with 3–4 labelled detents. If
-you want to match Creative's positions, use roughly 0 / 50 / 100 for Surround and
-0 / 33 / 66 / 100 for Dialog+. Whether the firmware interpolates between them or
-quantises to the nearest detent is **[unknown]**.
-
-## Surround
-
-**[Creative]** Opens up a wider sound field and simulates a surround speaker
-layout over two channels — HRTF-based virtualisation. Connect 2's three detents
-are **Normal**, **Wide** and **Ultra Wide**.
-
-**[community]** Reported to work genuinely well for positional cues in games with
-a real surround source, with modest quality cost. Less useful on stereo music.
-Slider sets the strength.
-
-**Help box:** Virtual surround. Widens the stage and places sounds around you
-from a multichannel source. Effective for games, less so for stereo music.
-
-## Crystalizer
-
-**[Creative]** Aims to restore detail and dynamic range lost to lossy compression
-— an expander with a treble tilt, in practice. Creative pitches it at MP3/streamed
-material and at adding bite to films and games.
-
-Immediately audible, and easy to overdo: it is boosting transients and top end,
-so on an already-bright headphone like the DT 990 PRO a high setting gets harsh
-fast.
-
-**Help box:** Re-expands dynamics and sharpens transients to counter compression
-artefacts. Audible immediately. Go easy on bright headphones.
-
-## Bass
-
-**[Creative]** Fuller, deeper low end, with added harmonics rather than pure
-level. Slider sets amount.
-
-**Help box:** Bass enhancement — adds depth and harmonic weight to the low end.
-
-## Smart Volume (and Smart Volume special)
-
-**[Creative]** Loudness levelling: continuously measures level and applies gain
-and attenuation so that quiet and loud passages, and different tracks, arrive at
-a consistent volume.
-
-You noticed these two controls are entangled, and that is real.
-
-**[bytes]** They are mutually exclusive by construction. `sbx_profile_switch()`:
-
-```python
-if smart_volume_special is None:
-    self.sbx_slider(..., SMART_VOLUME_SLIDER, value=...)
-else:
-    self.sbx_smart_volume_special(..., smart_volume_special_hex=...)
-```
-
-If a special mode is set, the **slider is never sent**. They write different
-feature slots (`05` for the slider, `06` for special) and set a *mode*, not an
-amount:
+**Smart Volume (+ special)** — loudness levelling: continuous gain/attenuation
+so quiet/loud passages and different tracks arrive at consistent volume. The
+slider and the "special" mode are mutually exclusive by construction:
+**[INFERRED]** (bytes) `sbx_profile_switch()` sends the slider (feature `05`)
+only if `smart_volume_special is None`, otherwise the special mode (feature
+`06`) and never the slider:
 
 | Special | Bytes | As float32 | Connect 2 calls it |
 |---|---|---|---|
-| Loud | `0000 803F` | 1.0 | **Auto** |
-| Night | `0000 0040` | 2.0 | Night |
+| Loud | `0000803F` | 1.0 | **Auto** |
+| Night | `00000040` | 2.0 | Night |
 
-**Naming warning [inferred]:** this app's label **"Loud" is probably wrong for
-the G6.** The name comes from upstream's capture; Connect 2's Smart Volume knob
-reads **Off · Auto · Night**, so value 1.0 is *Auto* — ordinary automatic
-levelling, not a "make it louder" mode. Same byte either way, but the UI label
-sets a misleading expectation. Worth renaming.
+**Naming warning [INFERRED]:** this app's "Loud" label is probably wrong —
+Connect 2's knob reads Off/Auto/Night, so 1.0 is ordinary automatic levelling
+("Auto"), not "make it louder"; same byte, misleading label, unconfirmed (see
+[Open questions](#open-questions)). **[INFERRED]** (Creative): Night mode
+adds a gentle equal-loudness EQ curve so bass/treble don't vanish at low
+volume. A special mode means a fixed levelling curve and an inert slider;
+`None` means a variable-strength leveller.
 
-Same 1.0/2.0 encoding as the decoder modes — an index, not a level. **[Creative]**
-describes Night mode as adding a gentle equalisation curve compensating for how
-human hearing behaves at low volume (equal-loudness compensation, so bass and
-treble do not vanish when you turn things down).
-
-That is why the volume behaves oddly: with a special mode set you are running a
-fixed levelling curve and the slider is inert; with it on `None` you are running a
-variable-strength leveller.
-
-The UI would read better with Smart Volume special directly under Smart Volume
-rather than at the end of the tab. **Noted, not changed** — you asked to leave it.
-
-**Help box:** Evens out volume differences between quiet and loud passages.
-Setting a special mode (Night or Loud) replaces the slider entirely — Night adds
-equal-loudness compensation for low-volume listening.
-
-## Dialog Plus
-
-**[Creative]** Your reading is right. It analyses centre-channel and dialogue
-content, extracts the vocal band through filtering and a frequency/time-domain
-algorithm, and lifts it so speech sits above the soundtrack and above room noise
-— without simply turning the whole mix up.
-
-**Help box:** Lifts voices and dialogue above the rest of the mix. Useful for
-films with buried dialogue.
+**Help box (Smart Volume):** Evens out volume differences between quiet and
+loud passages. A special mode (Night or Loud) replaces the slider entirely —
+Night adds equal-loudness compensation for low-volume listening.
 
 ---
 
 # Recording (CrystalVoice)
 
-Everything in this tab processes the **microphone**, not what you hear.
+Everything here processes the **microphone**, not what you hear.
 
 ## What actually works — listening tests
 
-**[this Mac]** Tested by ear on a ModMic V2 (a condenser) through the G6 on
-macOS:
+**[TESTED 2026-09-16]** on a ModMic V2 (condenser) through the G6 on macOS:
 
 | Control | Result |
 |---|---|
-| Mic Boost | **Works.** Immediate and obvious — the mic gets audibly louder. |
-| Noise Reduction (toggle) | **Works.** Audibly drops the noise floor *even with the level at 0*, so the toggle alone is doing real work. |
-| Noise Reduction Level | **Works.** At 100 the suppression is heavy enough to start eating parts of the voice. Mid-range is the better trade. |
-| Acoustic Echo Cancellation | **Works.** Removes echo, and costs some vocal clarity doing it. Sensible on for calls, off for recording. |
-| Mic Equalizer + presets | **Works.** On/off is clear and the presets genuinely differ. |
-| **Smart Volume** | **No audible effect.** See below. |
+| Mic Boost | Works — immediate, obvious loudness increase |
+| Noise Reduction (toggle) | Works — audibly drops the noise floor even at level 0 |
+| Noise Reduction Level | Works — at 100 the suppression starts eating the voice; mid-range is the better trade |
+| Acoustic Echo Cancellation | Works — removes echo, costs some clarity; sensible on for calls, off for recording |
+| Mic Equalizer + presets | Works — on/off is clear and the presets genuinely differ |
+| **Smart Volume** | **No audible effect** |
 
-### Nothing here removes keyboard and mouse clicks
+**Nothing here removes keyboard/mouse clicks** — confirmed no combination
+suppresses key or mouse noise. Expected, not a failing: Noise Reduction is a
+*steady-state* suppressor (estimates a constant noise profile and subtracts
+it); keyboard/mouse noise is short, loud, broadband transients that look
+like speech onsets to that algorithm. Removing them needs a transient
+suppressor or gate, on the computer, not this device.
 
-**[this Mac]** Confirmed: no combination of these controls suppresses key
-clatter or mouse clicks.
+**Recording Smart Volume did nothing** — the one control here with no
+observed effect while everything else behaved as documented, an unlikely
+candidate for user error. Unconfirmed explanations: its threshold may need a
+bigger mic-distance change than normal speech produces; it may be inactive
+over USB on macOS, like Direct Mode; or it may need another CrystalVoice
+block active first. **[INFERRED]** (bytes): the packet is unremarkable —
+feature `2C`, the same enable/commit shape as NR (`04`) and AEC (`00`), both
+of which demonstrably work — unlikely to be malformed. Open question, not a
+bug (see [Open questions](#open-questions)).
 
-That is expected rather than a failing. Noise Reduction is a *steady-state*
-noise suppressor — it estimates a constant noise profile (fans, hum, hiss) and
-subtracts it. Keyboard and mouse noise is the opposite: short, loud, broadband
-transients that look like speech onsets to that kind of algorithm. Removing them
-needs a transient suppressor or a gate, which lives on the computer, not on this
-device.
+**[TESTED 2026-09-16]** the "Dynamic Mic 1" preset **distorts** on the
+ModMic V2 — correct behaviour applied to the wrong mic type: the ModMic is a
+condenser, and Dynamic Mic 1 exists to add 8–12 dB for a dynamic mic's much
+lower output (the G6 supplies no phantom power **[INFERRED, Creative]** and
+takes a 3.5 mm 3-pole mono mic). Preset 6 is the most noticeable numbered
+preset — its aggressive presence lift reads as a slight echo, which AEC
+then partly removes, so the two audibly interact.
 
-### Smart Volume (recording) did nothing
+## Noise Reduction, AEC, Smart Volume (recording)
 
-**[this Mac]** The one control on this tab with no observable effect, while
-every other control on the same tab behaved exactly as documented — which makes
-a simple "user error" explanation unlikely.
+| Control | What it does **[INFERRED, Creative unless noted]** | Feature slot **[INFERRED, bytes]** | Help box |
+|---|---|---|---|
+| **Noise Reduction** (+Level) | Identifies steady background noise (fans, AC, hum) and suppresses it | toggle `04`, level `05` | Suppresses steady background noise on the mic. Level steps in 20% increments; the maximum sends half the device's full-scale parameter. |
+| **Acoustic Echo Cancellation** | Removes echo from speaker output picked up by the mic — a call-quality, not sound-quality, feature. Useful on **speakers**; near-pointless on **headphones** (no acoustic path) — a noticeable effect there is expected anyway, since AEC also runs an adaptive filter that can colour the voice with nothing to cancel | `00` | Cancels your speakers' sound being picked up by the mic during calls. Only meaningful when using speakers. |
+| **Smart Volume** (recording) | Automatically levels your own voice to constant loudness for the other party regardless of mic distance — the mic-side twin of playback Smart Volume. Useful for calls/streaming, undesirable for anything you plan to edit (destroys original dynamics). No audible effect observed — see [listening tests](#what-actually-works--listening-tests) | `2C` | Keeps your voice at a consistent level regardless of how close you are to the mic. Great for calls, bad for recordings you intend to edit. |
 
-Candidate explanations, none confirmed:
-
-- Its threshold may need a larger change in mic distance than ordinary speech
-  produces, so normal talking never triggers it.
-- It may be inactive over USB on macOS, the way Direct Mode is.
-- It may need Noise Reduction or another CrystalVoice block active first.
-
-**[bytes]** The packet itself is unremarkable — feature slot `2C`, the same
-enable/commit shape as Noise Reduction (`04`) and AEC (`00`), both of which
-demonstrably work. So the command is very unlikely to be malformed.
-
-Recorded as an open question rather than a bug.
-
-### A note on the "Dynamic Mic 1" preset
-
-**[this Mac]** Confirmed: on a ModMic V2 it **distorts**. That is the preset
-behaving correctly and being applied to the wrong kind of microphone — the
-ModMic is a condenser, and Dynamic Mic 1 exists to add 8–12 dB for a *dynamic*
-mic's much lower output. Also worth knowing that the G6 does not supply phantom
-power **[Creative]** and takes a 3.5 mm 3-pole mono mic.
-
-Separately: **Preset 6** is the most noticeable of the numbered presets, and its
-aggressive presence lift can read as a slight echo — which Acoustic Echo
-Cancellation then partly removes, so the two interact audibly.
-
-## Noise Reduction (+ Level)
-
-**[Creative]** Analyses the mic signal, identifies steady background noise, and
-suppresses it so your voice carries over it. Fans, air conditioning, hum.
-
-**[bytes]** The toggle writes feature `04`. The level writes feature `05` — and
-the level scale is not what the UI suggests:
-
-| UI level | Bytes | As float32 |
-|---|---|---|
-| 0 | `0000 0000` | 0.0 |
-| 20 | `CDCC CC3D` | 0.1 |
-| 40 | `CDCC 4C3E` | 0.2 |
-| 60 | `9A99 993E` | 0.3 |
-| 80 | `CDCC CC3E` | 0.4 |
-| 100 | `0000 003F` | **0.5** |
-
-The slider's 100% sends 0.5, not 1.0. Steps of 20 only. **[inferred]** So the UI
-maximum is the middle of the underlying parameter's range — either Creative caps
-it deliberately, or the upper half was never captured. Either way, "100" is not
-"as much as the device can do".
-
-**Help box:** Suppresses steady background noise on the mic. Level steps in 20%
-increments; the maximum sends half the device's full-scale parameter.
-
-## Acoustic Echo Cancellation
-
-**[Creative]** Removes the echo caused by your speakers' output being picked up
-by your mic and sent back to the far end. A call-quality feature, not a
-sound-quality one.
-
-**[bytes]** Feature slot `00`.
-
-Genuinely useful on **speakers**; near-pointless on **headphones**, where there
-is no acoustic path from output to mic. You reported noticing an effect — that is
-expected, because AEC also runs an adaptive filter on the mic signal, so it can
-colour the voice even with nothing to cancel.
-
-**Help box:** Cancels your speakers' sound being picked up by the mic during
-calls. Only meaningful when using speakers — on headphones there is no echo path.
-
-## Smart Volume (recording)
-
-**[Creative]** Automatically levels *your own voice* so you arrive at a constant
-loudness to the other party whether you are leaning into the mic or sitting back.
-The mic-side twin of playback Smart Volume.
-
-**[bytes]** Feature slot `2C`.
-
-Very useful for calls and streaming. Undesirable for recording anything you plan
-to edit, since it destroys the original dynamics.
-
-**Help box:** Keeps your voice at a consistent level regardless of how close you
-are to the mic. Great for calls, bad for recordings you intend to edit.
+**[INFERRED]** (bytes): Noise Reduction's level scale is not linear 0–1 —
+0/20/40/60/80/100 on the slider send float32 0.0/0.1/0.2/0.3/0.4/**0.5**.
+The slider's 100% sends 0.5, not 1.0, in steps of 20 only: either Creative
+deliberately caps the UI at the middle of the underlying range, or the upper
+half was never captured — either way, "100" isn't "as much as the device
+can do."
 
 ## Mic Equalizer + presets
 
-**[bytes]** This is the best-documented thing on the page, because the presets are
-not opaque — they are eight float32 gains in dB, written to feature slots
-`14`–`1B`, low band to high. Decoded in full:
+**[INFERRED]** (bytes): 8 float32 gains in dB, feature slots `14`–`1B`, low
+band to high:
 
 | Preset | B1 | B2 | B3 | B4 | B5 | B6 | B7 | B8 | Shape |
 |---|---|---|---|---|---|---|---|---|---|
-| Preset 1 | −3 | −4 | 0 | *(0)* | +3 | −3 | +4 | +5 | Cut lows, scoop mids, lift presence |
-| Preset 2 | −3 | −4 | 0 | *(0)* | +4 | −2 | +2 | +4 | As 1, gentler top |
-| Preset 3 | −2 | −3 | +3 | +4 | +4 | −4 | +3 | +2 | Forward mids, notch, mild air |
-| Preset 4 | −3 | −5 | 0 | +4 | 0 | −3 | 0 | 0 | Clean-up only: cut rumble, one mid lift |
-| Preset 5 | −2 | −3 | +2 | +4 | +4 | 0 | −3 | +2 | Warm and mid-forward, tamed presence |
-| Preset 6 | −5 | −4 | −2 | 0 | +3 | +4 | +6 | +7 | Aggressive bright/telephone tilt |
-| Preset 7 | 0 | +3 | −2 | −4 | −4 | −2 | +5 | +7 | Smile curve: body + air, scooped mids |
-| Preset 8 | 0 | 0 | +2 | +2 | +3 | −4 | +2 | +4 | Mild all-round lift |
-| Preset 9 | 0 | 0 | +2 | +2 | −2 | 0 | −4 | +4 | Softens presence, keeps air |
-| Preset 10 | 0 | +2 | −2 | 0 | +3 | +5 | +6 | +5 | Bright, intelligibility-focused |
+| 1 | −3 | −4 | 0 | *(0)* | +3 | −3 | +4 | +5 | Cut lows, scoop mids, lift presence |
+| 2 | −3 | −4 | 0 | *(0)* | +4 | −2 | +2 | +4 | As 1, gentler top |
+| 3 | −2 | −3 | +3 | +4 | +4 | −4 | +3 | +2 | Forward mids, notch, mild air |
+| 4 | −3 | −5 | 0 | +4 | 0 | −3 | 0 | 0 | Clean-up only |
+| 5 | −2 | −3 | +2 | +4 | +4 | 0 | −3 | +2 | Warm, mid-forward, tamed presence |
+| 6 | −5 | −4 | −2 | 0 | +3 | +4 | +6 | +7 | Aggressive bright/telephone tilt |
+| 7 | 0 | +3 | −2 | −4 | −4 | −2 | +5 | +7 | Smile curve: body + air, scooped mids |
+| 8 | 0 | 0 | +2 | +2 | +3 | −4 | +2 | +4 | Mild all-round lift |
+| 9 | 0 | 0 | +2 | +2 | −2 | 0 | −4 | +4 | Softens presence, keeps air |
+| 10 | 0 | +2 | −2 | 0 | +3 | +5 | +6 | +5 | Bright, intelligibility-focused |
 | Dynamic Mic 1 | 0 | +8 | 0 | +12 | +12 | +4 | +8 | +10 | Huge broadband lift |
 
-**Reading the table.** The presets are unnamed in Creative's software too — they
-are voicings, not scenarios. The pattern across them is a classic broadcast-mic
-toolkit: cut low-frequency rumble and proximity-effect mud (bands 1–2), and lift
-the presence and air bands (7–8) for intelligibility. Bands run low to high;
-that ordering is **[inferred]** from the slot order and the consistent
-low-cut/high-boost shape, not documented.
+Presets are unnamed in Creative's software too — voicings, not scenarios. The
+pattern is a classic broadcast-mic toolkit: cut low rumble/proximity mud
+(bands 1–2), lift presence/air (7–8) for intelligibility. Band ordering
+(low→high) is **[INFERRED]** from slot order and the consistent shape, not
+documented. **Dynamic Mic 1** is the one with a real name (`PRESET_DM_` in
+source): dynamic mics (SM58, Procaster) run quieter and darker than an
+electret headset mic, and +8–12 dB broadband matches that — **don't use it
+with a headset mic**, it will be loud and harsh.
 
-**Dynamic Mic 1 is the one with a real name**, and it is the giveaway: `PRESET_DM_`
-in the source. Dynamic microphones (an SM58, a Procaster) put out far less signal
-than the electret condenser in a headset, and are darker. +8 to +12 dB of
-broadband lift is exactly what you would apply to one. **Do not use it with a
-headset mic** — it will be loud and harsh.
+Practical picks: **4** for cleanup with minimal colour; **6 or 10** for
+maximum call intelligibility; **7** for a fuller "radio" voice; **Dynamic
+Mic 1** only with an actual dynamic mic.
 
-Practical picks: **Preset 4** if you just want cleanup with minimal colour;
-**Preset 6 or 10** for maximum intelligibility on voice calls; **Preset 7** if you
-want a fuller "radio" voice; **Dynamic Mic 1** only with an actual dynamic mic.
+**A bug, [INFERRED] from the bytes alone** (source:
+`src/g6_cli/g6_spec/recording.py`) — already certain, just never hand-verified
+by ear: band 4 of Presets 1 and 2 is written as `0000 4000`, breaking the
+`0000 XX40`/`XXC0` pattern every other entry follows; it decodes to a denormal
+float (~0) rather than the evident intent of `0000 0040` (+2 dB) — a
+byte-swap. Band 4 comes out flat instead of +2 dB on those two presets. Worth
+reporting upstream.
 
-### A bug in two presets
-
-**[bytes]** Band 4 of Preset 1 and Preset 2 is written as `0000 4000`. Every
-other entry in the table follows the pattern `0000 XX40` (positive) or
-`0000 XXC0` (negative). `0000 4000` decodes to 5.88 × 10⁻³⁹ — a denormal float,
-effectively zero.
-
-It is a byte-swap: the intended value is almost certainly `0000 0040`, i.e.
-**+2 dB**. The consequence is small but real — band 4 comes out flat instead of
-+2 dB on those two presets. This is upstream's capture, in
-`src/g6_cli/g6_spec/recording.py`, and is worth reporting.
-
-**Help box:** An 8-band EQ on the mic path. Presets are voicings, not scenarios —
-most cut low rumble and lift presence. "Dynamic Mic 1" adds 8–12 dB and is only
-for an actual dynamic microphone, not a headset.
+**Help box:** An 8-band EQ on the mic path. Presets are voicings, not
+scenarios — most cut low rumble and lift presence. "Dynamic Mic 1" adds
+8–12 dB and is only for an actual dynamic microphone, not a headset.
 
 ## Mic Boost, Recording Volume, Monitoring
 
-**[bytes]** Three different things that all look like "volume":
+**[INFERRED]** (bytes) — three different things that all look like "volume":
 
-- **Mic Boost** — analog preamp gain, in plain integer dB: 0, 10, 20, 30.
-  Raises signal *and* noise floor. Use the least that gets you a healthy level.
-- **Recording Volume** — the level sent to the computer. Signed 16-bit, 1/256 dB:
-  0% is −48 dB, 100% is **+9 dB**. Note it goes positive — the top of this slider
-  is amplification, not just "no attenuation".
-- **Monitoring Volume** — sidetone. How loudly *you* hear yourself in your own
-  headphones. Uses the same dB table as playback volume (0% = −64 dB, 100% = 0 dB).
-  **Caveat [Creative]:** on the *hardware* control, sidetone volume is **synced
-  with the mic recording volume** — so turning the knob in sidetone mode also
-  changes how loud you are to everyone else. Whether the two HID/UAC controls in
-  this app stay independent of each other is **[unknown]** and worth testing
-  before trusting the sidetone slider as a monitor-only control.
+- **Mic Boost** — analog preamp gain, plain integer dB: 0/10/20/30. Raises
+  noise floor too; use the least that gets a healthy level.
+- **Recording Volume** — level sent to the computer, signed 16-bit/1/256 dB:
+  0% = −48 dB, 100% = **+9 dB** — the top of the slider is amplification, not
+  just "no attenuation."
+- **Monitoring Volume** — sidetone, how loud *you* hear yourself. Same dB
+  table as playback volume (0% = −64 dB, 100% = 0 dB). **[INFERRED]**
+  (Creative): on the *hardware* control, sidetone volume is **synced with
+  mic recording volume** — turning the knob in sidetone mode also changes how
+  loud you are to everyone else. Whether this app's two controls (HID
+  monitoring vs. UAC recording volume) stay independent is **[unknown]** —
+  test before trusting the sidetone slider as monitor-only.
 
-Sidetone is off by default and is toggled **on the device**, not in software
-**[Creative]**: hold the volume knob for 2 seconds. The knob's LED goes white →
-red, and the side indicator switches from the headphone icon to the mic icon. A
-blinking white LED means sidetone is muted.
+**[INFERRED]** (Creative): sidetone is off by default and toggled **on the
+device**, not in software — hold the volume knob 2 s; the knob LED goes
+white→red and the side icon switches headphone→mic; a blinking white LED
+means sidetone is muted.
 
 **Help box:** Mic Boost is analog preamp gain (0–30 dB, boosts noise too).
-Recording Volume is the level sent to the computer (−48 dB to +9 dB). Monitoring
-is sidetone — how loudly you hear yourself, heard by nobody else.
+Recording Volume is the level sent to the computer (−48 dB to +9 dB).
+Monitoring is sidetone — how loudly you hear yourself, heard by nobody else.
 
 ---
 
 # Mixer, Lighting, System
 
-**Mixer** — per-source mute and volume for Line In, External Mic, S/PDIF In and
-What U Hear, split into recording level and monitoring level. All USB Audio Class
+**Mixer** — per-source mute/volume for Line In, External Mic, S/PDIF In and
+What U Hear, split into recording and monitoring level. All USB Audio Class
 controls, so the **whole tab is hidden on macOS**.
 
-**Lighting** — on/off plus a 24-bit RGB colour. **[bytes]** Cosmetic only; enabling
-takes three packets (`3A02`/`3A06`/`3A09`) and the colour is plain 0–255 per channel.
+**Lighting** — on/off plus 24-bit RGB. **[INFERRED]** (bytes): cosmetic only;
+enabling takes three packets (`3A02`/`3A06`/`3A09`), colour is plain 0–255
+per channel.
 
-**System** — version info and the model file path. On Linux, the audio-interface
-claim switch that releases the kernel driver so the volume controls work. macOS
-forbids that, which is why the volume rows are absent there.
+**System** — version info and the model file path. On Linux, the
+audio-interface claim switch releases the kernel driver so volume controls
+work; macOS forbids that, which is why the volume rows are absent there.
+
+The System tab's device-info row is labelled a **USB device revision**
+(`bcdDevice` — a USB descriptor field cached by hidapi/pyusb, a passive read
+that writes nothing), and is explicitly *not* a firmware-version readback.
+**[INFERRED]** (bytes/protocol): the G6's control protocol has no documented,
+wire-verified way to return a firmware version string like
+`2.1.250903.1324` — a different request (the `0xE0` GET group) from the
+decoded DSP-register readback described [below](#control-protocol-and-readback),
+which this app doesn't use either way. `help_text.SYSTEM_DEVICE_INFO` in
+`src/g6_gui/help.py` states this accurately.
+
+**[TESTED 2026-09-17]** `experimental/probe-g6-hid.py` swept every
+sub-command of the `5A E0` GET group against the real G6; all nine returned a
+byte-identical response (`5a 02 0a e0 81 ...`) — no firmware version came
+back. The "USB device revision" label is the honest one to show, not a
+placeholder for an easy fix. Frame-format analysis: [`hid-probe-findings.md`](hid-probe-findings.md).
+
+---
+
+# Control protocol and readback
+
+Every "no readback" statement elsewhere in this document is about this app's
+own behaviour, not a limit of the G6 itself:
+
+- **[INFERRED]** (real captured USB traffic in this repo's `payloads/raw/*.pcapng`,
+  recorded by upstream and decoded by this project 2026-09-17, not reproduced
+  live by us): the G6's HID protocol has a real, decoded read path — a
+  `WRITE` (`12 07`), a `READ REQUEST` (`11 03`), and a `READ RESPONSE`
+  (`11 08`) carrying the value back. Full grammar and captured proof:
+  [`device-state.md`](device-state.md#the-control-protocol-and-why-readback-is-real-but-unused).
+  **[INFERRED]** (reasoning from the 31 captured ACKs, all status `0x00`, none
+  a failure): status `0x81` most likely signals rejection, by contrast, not
+  by direct confirmation of a failure case.
+- This app doesn't use that read path today. `src/g6_cli` already sends a
+  read request after most writes — misleadingly named
+  `DataFragmentMode.COMMIT` — receives the real value back, and discards it.
+- A related but separate question — a firmware-version string over this
+  protocol — **was** tested directly against real hardware and refused (see
+  the System tab section above, and [`hid-probe-findings.md`](hid-probe-findings.md)).
 
 ---
 
 # What this app does *not* expose
 
-Not bugs — never captured in the upstream protocol work:
+Never captured in the upstream protocol work — not bugs:
 
-| Feature | Detail **[Creative]** |
+| Feature | Detail **[INFERRED, Creative]** |
 |---|---|
-| **Scout Mode** | Button on the G6, or Connect 2 with an assignable hotkey. Enabling it **temporarily disables SBX and the EQ** until you turn it off. |
-| **Playback equalizer** | 10 bands, **31 Hz – 16 kHz**, plus Bass and Treble, with presets: Acoustic, Classical, Country, Dance, Flat, Hip Hop, Jazz, Pop, R&B, Rock, Vocal. Unrelated to the mic EQ here. |
-| **Output Mode / Configuration** | The `Audio Effects · Direct · SPDIF-Out Direct` radio, and Stereo/5.1/7.1. This app has only two of those as loose booleans. |
-| **Headphone virtualization target** | `Headphones` or `Line and Optical Out`. |
-| **Speaker type** | Desktop / Bookshelf / Tower / Custom, with a **crossover from 10 Hz to 1000 Hz**. |
-| **Voice Morph** | Real-time voice alteration for chat and casting. |
-| **Lighting modes** | Only *Solo* (a fixed colour) is exposed here. Connect 2 adds **Pulsate**, **Music Reactive** and **Cycle**, each with speed 10–250. |
-| **LED indicator off** | A firmware-dependent switch to turn the volume and Direct Mode LEDs off entirely. |
-| **Firmware update** | Windows-only, via Connect 2. |
-| **20 BlasterX Experience profiles** | See [Profiles](#profiles--gaming--music--cinema--special). |
-| **Gain switch** | Physical switch on the device. Set it for your headphone impedance. |
-| **Sample-rate selection** | The OS, not the device. |
+| Scout Mode | Button or Connect 2 hotkey; temporarily disables SBX and the EQ |
+| Playback equalizer | 10 bands, 31 Hz–16 kHz, plus Bass/Treble, with genre presets |
+| Output Mode / Configuration | The 3-way `Audio Effects·Direct·SPDIF-Out Direct` radio, and Stereo/5.1/7.1 — this app has only two loose booleans |
+| Headphone virtualization target | `Headphones` or `Line and Optical Out` |
+| Speaker type | Desktop/Bookshelf/Tower/Custom, crossover 10 Hz–1000 Hz |
+| Voice Morph | Real-time voice alteration |
+| Lighting modes | Only *Solo* here; Connect 2 adds Pulsate, Music Reactive, Cycle (speed 10–250) |
+| LED indicator off | Firmware-dependent switch, off entirely |
+| Firmware update | Windows-only, via Connect 2 |
+| 20 BlasterX Experience profiles | See [Profiles](#profiles--gaming--music--cinema--special) |
+| Gain switch | Physical, set for your headphone impedance |
+| Sample-rate selection | Done by the OS, not the device |
 
-Connect 2 itself is **Windows-only** (7/8/10) and refuses to run without the G6
-attached over USB. There has never been a Mac equivalent — which is the gap this
-project fills.
+Connect 2 itself is Windows-only (7/8/10) and won't run without the G6
+attached — there's never been a Mac equivalent, the gap this project fills.
 
 ---
 
-# How this document maps onto the UI
+# How this maps onto the UI
 
-Every control in the GUI carries an **ⓘ** button. Pressing it expands a plain-text
-summary of the relevant section below, and pressing **✕** collapses it again. The
-wording lives in `src/g6_gui/help.py`, which is the single source shared with
-this document — if the two ever disagree, that file and this file should be
-changed together.
-
-The ⓘ button stays clickable even when the control it explains is disabled,
-which is exactly when the explanation is most wanted (`widgets.set_enabled`
-skips anything marked `always_enabled`).
-
-Changes made to the UI as a result of this research:
-
-| Change | Why |
-|---|---|
-| **Direct Mode is disabled on macOS**, with a warning and an **Open Audio MIDI Setup** button | macOS overrides the device's mode, so the switch was silently inert. See [the macOS section](#macos-audio-midi-setup-is-the-real-control). |
-| **SPDIF-Out Direct is left enabled on macOS** | macOS has no equivalent setting for it, so it is unverified rather than known-broken. See [what the clock source does not cover](#what-the-clock-source-does-not-cover). |
-| **Help text uses the system label colour** | A fixed grey that looks muted on a white background is close to unreadable in macOS dark mode. |
-| **The two are now mutually exclusive** — turning one on turns the other off | They are two positions of one three-way Output Mode on the device, so both-on was a state the hardware cannot hold. |
-| **Smart Volume special moved directly under Smart Volume** | It overrides the Smart Volume slider, so stranding it at the bottom of the tab hid the relationship. |
-| **Changing "Editing profile" no longer writes to the device** | It was silently performing the profile switch. See [the bug](#bug-changing-editing-profile-already-switches-the-profile). |
-| **A note under Decoder mode** saying it only affects Dolby over optical | The single most confusing "this does nothing" in the app. |
-| **A new macOS Audio tab** reads and switches Clock Source/Format directly via Core Audio, and disables Recording/SBX while Stereo Direct is active | Turns the manual Audio MIDI Setup workaround into something this app does for you, safely. Confirmed working against a real G6. See [the section above](#this-app-now-controls-it-directly--the-macos-audio-tab). |
-| **macOS Audio is the first tab**, not the last | It is the actual Direct Mode control on macOS — the most consequential setting on the whole device — so it leads rather than being buried after Playback. |
-| **The status line shows the current Format, not just the Clock Source** | Both matter for knowing what is actually playing; showing only one was an oversight. |
-| **Exclusive-mode formats are labelled `(Exclusive)`** and are genuinely distinct, selectable entries | They used to be indistinguishable duplicates of the ordinary format at the same rate/bit depth — a real bug, caught once real hardware was available. See [the discovery above](#a-real-discovery-the-g6-offers-two-variants-of-every-format). |
-| **Switching Clock Source now waits for the Format list to catch up** before finishing | The two properties update on different schedules; returning immediately left the Format dropdown showing the previous clock source's list. |
-
-Still deliberately *not* changed, and why:
-
-- **The Output Mode radio** is still modelled as two booleans rather than one
-  three-way selector per output. Mutual exclusivity papers over the worst of it,
-  but the honest fix is a redesign of that section, and it would also want the
-  `Audio Effects` state the protocol capture never covered.
-- **"Loud" has not been renamed to "Auto"**, because that is still
-  **[inferred]** rather than confirmed.
-- **The profile model** still has four local slots with no Creative preset
-  content.
-- **The macOS Audio tab does not cover SPDIF-Out Direct.** It is a Clock
-  Source option, and SPDIF-Out Direct has no Clock Source equivalent (see
-  [what the clock source does not cover](#what-the-clock-source-does-not-cover)) —
-  there is nothing in Core Audio for this tab to read or write for it.
+Every control carries an **ⓘ** button that expands a plain-text summary of
+its section here (`✕` collapses it); the wording lives in `src/g6_gui/help.py`,
+kept in sync with this document by hand. The button stays clickable even when
+its control is disabled, which is exactly when the explanation is most
+wanted. Current UI decisions driven by this research, not repeated
+elsewhere in this document: Direct Mode is disabled on macOS with an **Open
+Audio MIDI Setup** button; SPDIF-Out Direct and Direct Mode are mutually
+exclusive in the UI (mirroring the device); Smart Volume special sits
+directly under the Smart Volume slider it overrides; and help text uses the
+system label colour rather than a fixed grey, which was close to unreadable
+in macOS dark mode.
 
 ---
 
 # Open questions
 
-Most of the original list is now answered — by Creative's own G6 FAQ, by the G5
-knowledge-base article, and by reproducing the profile bug against the fake API.
-What is left:
-
-### 0. Why does recording Smart Volume do nothing? **[unknown]**
-
-See [the listening tests](#what-actually-works--listening-tests). The most
-informative next step is trying it on Windows with Creative's own software: if it
-is inert there too, it is the device or the mic; if it works there, it is
-something about this app's or macOS's handling.
-
-### 1. Are sidetone and mic recording volume linked in software too? **[unknown]**
-
-Creative documents the *hardware* sidetone control as sharing its level with mic
-recording volume. This app exposes them as two independent controls. If they are
-linked in the device, turning up your monitor level also makes you louder to
-everyone else — which would make the sidetone slider actively misleading.
-
-Test: set monitoring to 100% and recording to 10%, then have someone confirm your
-level; repeat with monitoring at 0%.
-
-### 1b. Does the macOS Audio tab actually find and control a real G6? **[this Mac] — confirmed**
-
-Resolved: yes. See [confirmed against the real G6](#confirmed-against-the-real-g6--no-longer-a-guess).
-
-### 1c. Why does a clock-source switch occasionally take over a second? **[unknown]**
-
-Confirmed real and reproducible, cause not identified. Most switches settle in
-under 300ms; twice, the identical operation took over a second with nothing
-else different. Candidates, none confirmed: USB transaction queuing on the
-G6 side, some macOS-side re-enumeration of the device's properties after a
-mode change, or something else entirely. The settle-poll budget in
-`coreaudio.py` is generous specifically because of this. Worth revisiting if
-it turns out to correlate with something identifiable — logging the exact
-timing of many consecutive switches would be the way to look.
-
-### 2. Does this app's Direct Mode packet do anything on Windows? **[unknown]**
-
-On macOS it is provably overridden — confirmed by ear. On Windows, where the OS
-does not assert the mode, the same packet may well work. Nobody has tested this
-project there. Note that even Creative's own Windows instructions for reaching
-384 kHz never mention the Direct Mode toggle, only the OS format dialog.
-
-### 2b. Are the SBX sliders continuous, or quantised to Creative's detents? **[unknown]**
-
-Connect 2 gives Surround three labelled positions and Dialog+ four, while the
-wire format is a float from 0.0 to 1.0. Either the firmware interpolates — in
-which case this app offers finer control than Creative's own software — or it
-snaps to the nearest detent and most slider positions are wasted. Audible test:
-sweep Surround slowly and listen for steps.
-
-### 2c. Is "Loud" really "Auto"? **[inferred]**
-
-Value 1.0 is labelled *Loud* here and *Auto* in Connect 2. Almost certainly the
-same mode under two names, but worth confirming before renaming the UI.
-
-### 3. Decoder mode with a real Dolby source **[unknown]**
-
-Needs a Dolby Digital bitstream on the optical input — a PS4/Xbox set to
-bitstream output, per Creative's documented wiring. Then Full vs Night should be
-obvious on a film with wide dynamics.
-
-### 4. SPDIF-Out Direct on a G6 **[unknown]**
-
-Two separate unknowns here.
-
-**Does it work on macOS at all?** Direct Mode provably does not, but that
-argument does not transfer — see
-[what the clock source does not cover](#what-the-clock-source-does-not-cover).
-The switch is deliberately left enabled so this can be answered.
-
-**Does the G5 behaviour table hold for a G6?** The no-effects rule is confirmed
-for the G6, but "optical goes silent in Direct Mode" and "volume no longer
-controllable" have not been verified on one.
-
-Both need something plugged into the optical output — a receiver, a soundbar, or
-anything with a TOSLINK input.
-
-### 5. The band-4 preset bug **[bytes]**
-
-Already certain from the bytes; confirming by ear or measurement would let it be
-reported upstream with evidence.
-
-### 6. What a factory reset actually restores **[unknown]**
-
-Worth doing once deliberately, because it is the only way to make the device and
-`g6.json`'s assumed defaults genuinely agree. Costs you your lighting colour and
-every saved setting.
+| # | Question | What's known, and the test that would settle it |
+|---|---|---|
+| 1 | Why does recording Smart Volume do nothing? | See [listening tests](#what-actually-works--listening-tests). Test: try it on Windows with Creative's software — inert there points at the device/mic, working there points at this app or macOS. |
+| 2 | Are sidetone and mic recording volume linked in software too? | Creative documents the *hardware* control as sharing level with recording volume; this app exposes two independent controls. Test: monitoring 100%/recording 10%, have someone confirm your level, repeat at monitoring 0%. |
+| 3 | Why does a clock-source switch occasionally take over a second? | Confirmed real and reproducible (2026-09-16), cause unidentified — most switches settle under 300 ms, two took over a second with nothing else different. Candidates: USB transaction queuing, macOS re-enumeration. Test: log timing across many consecutive switches. |
+| 4 | Are the SBX sliders continuous, or quantised to Creative's detents? | Connect 2 gives Surround 3 positions and Dialog+ 4; the wire format is a float 0.0–1.0. Test: sweep Surround slowly and listen for steps. |
+| 5 | Is "Loud" really "Auto"? | See [Smart Volume](#how-creatives-own-ui-presents-these-five) — almost certainly the same mode as Connect 2's "Auto." Worth confirming before renaming the UI label. |
+| 6 | Decoder mode with a real Dolby source | Needs a Dolby bitstream on optical in (PS4/Xbox set to bitstream output); Full vs. Night should then be obvious on a wide-dynamics film. |
+| 7 | Does SPDIF-Out Direct work on macOS, and does the G5 behaviour table hold on a G6? | Direct Mode provably doesn't work on macOS, but that doesn't transfer (no Clock Source equivalent). The no-effects rule is confirmed for the G6; "optical goes silent"/"volume uncontrollable" aren't. Needs something plugged into the optical output. |
+| 8 | Confirm the band-4 preset bug by ear | Already certain from the bytes (see [Mic Equalizer](#mic-equalizer--presets)); an audible/measured confirmation would let it be reported upstream with corroborating evidence. |
+| 9 | What does a factory reset actually restore? | The only way to make the device and `g6.json`'s assumed defaults agree. Worth doing once deliberately — costs lighting and every saved setting. |
+| 10 | What is the 2025 firmware's new capability bit for? | **[INFERRED]** (g6-re): the Direct Mode enable ACK byte changed `0x81`→`0x83` between 2019 and 2025 firmware, no corresponding feature identified anywhere. |
+| 11 | Does NOS actually apply on real hardware, given the persistence bug? | See [NOS](#the-fifth-filter--non-over-sampling-nos-hidden-by-creative). Should write correctly then error/revert the UI without saving; whether the device-side write survives and audibly applies is untested. Test: select NOS, then listen for reduced pre-ringing/treble roll-off despite the error. |
+| 12 | Would `SpeakersHRTFMode` do anything audible here? | See [`firmware-findings.md` §6](firmware-findings.md#6-hrtf-mode--what-it-is-and-why-this-app-doesnt-touch-it) — live and controllable per g6-re, but speaker-framed; not implemented here at all (headphone-only development). Needs a speaker setup and the `SET 30` message. |
+| 13 | Is "G6X" (USB PID `0x3263`) really the USB-C G6 revision? | See [`firmware-findings.md` §7](firmware-findings.md#7-sound-blasterx-g6-versus-g6x--what-the-evidence-actually-shows) — one third-party project says yes, two USB-ID databases attribute the PID elsewhere; neither confirmed against hardware. Test: read a real G6's USB descriptors (`lsusb -v` / `system_profiler SPUSBDataType`). |
+| 14 | Does the G6 remember a 7.1 selection made on another OS? | See [Virtual 7.1](#virtual-71). Present-state baseline is measured (2 ch, zero non-stereo formats); whether a Windows/Linux 7.1 selection persists into a later macOS session is untested. |
+| 15 | Do `--playback-speakers-to-7-1`/`-to-5-1` do anything at all? | See [Virtual 7.1](#virtual-71) — the CLI sends byte-identical packets for stereo/5.1/7.1, doubtful but unconfirmed. Test on Linux: `--playback-speakers-to-7-1 --claim-and-release`, then check `pactl list sinks`/`pw-cli ls Node` for a channel-count change. |
+| 16 | Where inside the G6 does volume attenuation happen — digital or analog? | See [above](#volume-forwards-to-the-device-not-the-host). That macOS forwards to the device is closed; pre- vs. post-DAC is not, and decides how the [full-scale fix](#full-scale-volume--the-g6-distorts-at-100) actually works. Test: `docs/g6-re/tools/thd_test.py` at several volume settings with a loopback cable. |
 
 ---
 
 # Documents still wanted
 
-Creative's knowledge base geo-redirects and renders via JavaScript, so it cannot
-be fetched from here — but it prints to PDF fine. These would each close a gap:
-
-SID 200074, 200065 and 200066 have all been supplied and are now in
-`docs/pdfs/`. Still outstanding:
+Creative's knowledge base geo-redirects and renders via JavaScript, so it
+can't be fetched here — but prints to PDF fine. SID 200074, 200065 and 200066
+are already supplied, in `docs/pdfs/`. Still wanted:
 
 | Wanted | Why |
 |---|---|
-| A screenshot of **Connect 2's Voice → Clarity page** | Would settle whether Creative's "Voice Enhancer" is what this app calls *Mic Equalizer*, and show the eight band frequencies |
-| The **settings behind any one BlasterX Experience profile** | Would let the four empty slots be filled with Creative's real voicings — even one (Gaming, say) would establish the format |
-| Anything on the **playback filters** with actual curves | Creative's own page says only "4 options to control steepness" |
+| A screenshot of Connect 2's Voice → Clarity page | Settles whether Creative's "Voice Enhancer" is this app's *Mic Equalizer*, and shows the eight band frequencies |
+| The settings behind any one BlasterX Experience profile | Would let the four empty slots be filled with a real voicing — even one establishes the format |
+| Anything on the playback filters with actual curves | Creative's own page says only "4 options to control steepness" |
 
-Reddit is the other gap: it is blocked by policy in the built-in browser *and*
-Anthropic's crawler does not index it, so pasting threads in — as you have been
-doing — is the only route.
+Reddit is the other gap: blocked by policy in the built-in browser, and not
+indexed by Anthropic's crawler, so pasting threads in is the only route.
 
 # Sources
 
 - [Creative — Acoustic Engine](https://us.creative.com/technology/acousticengine/) — Surround, Crystalizer, Bass, Smart Volume, Dialog Plus
 - [Creative — Sound Blaster technologies](https://us.creative.com/soundblaster/technology/) — Smart Volume Night mode, Scout Mode, CrystalVoice
-- [Creative — CrystalVoice](https://us.creative.com/technology/crystalvoice/) — Noise Reduction, Acoustic Echo Cancellation, mic Smart Volume
-- **Creative KB Solution ID 200071 — *Sound BlasterX G6: Frequently Asked Questions*** — the single best source here. G5-vs-G6 table, Direct Mode on macOS (Q19), mic recording in Direct Mode (Q42), optical + SBX (Q14), sidetone (Q12), factory reset (Q17), Mac feature set (Q18). Supplied as PDF.
-- **Creative KB Solution ID 128701 — *Sound BlasterX G5: Direct Mode versus SPDIF-Out Direct*** — the mutual-exclusivity rule and the behaviour table. Supplied as PDF.
-- **Creative KB Solution ID 200074 — *Sound BlasterX G6: Sound Blaster Connect 2 Software*** — the richest source. The `Audio Effects · Direct · SPDIF-Out Direct` radio, the Acoustic Engine knob ranges, the Dolby knob, the 20 profiles, the 10-band EQ, lighting modes, and everything this project does not expose. Supplied as PDF (`docs/pdfs/200074.pdf`).
-- **Creative KB Solution ID 200065 — *Sound BlasterX G6: Technical Specifications*** — SB-Axx1 DSP, 16–600 Ω, Dolby decoding via Optical In, per-mode sample rates. Supplied as PDF.
-- **Creative KB Solution ID 200066 — *Enabling 32bit 384kHz Playback in Windows*** — the Windows equivalent of the macOS clock-source dance. Supplied as PDF.
-- [Creative — Sound BlasterX G6 product page](https://us.creative.com/p/sound-blaster/sound-blasterx-g6-usb-c) — 32-bit/384 kHz, 1 Ω output impedance, optical I/O
+- [Creative — CrystalVoice](https://us.creative.com/technology/crystalvoice/) — Noise Reduction, AEC, mic Smart Volume
+- Creative KB SID 200071 — *G6 FAQ*: G5-vs-G6 table, Direct Mode on macOS (Q19), mic recording in Direct Mode (Q42), optical+SBX (Q14), sidetone (Q12), factory reset (Q17), Mac feature set (Q18). PDF supplied.
+- Creative KB SID 128701 — *G5: Direct Mode versus SPDIF-Out Direct* — mutual-exclusivity rule and behaviour table. PDF supplied.
+- Creative KB SID 200074 — *G6: Sound Blaster Connect 2 Software* — Output Mode radio, Acoustic Engine ranges, Dolby knob, 20 profiles, 10-band EQ, lighting modes. PDF supplied (`docs/pdfs/200074.pdf`).
+- Creative KB SID 200065 — *G6: Technical Specifications* — SB-Axx1 DSP, 16–600 Ω, Dolby via Optical In, per-mode rates. PDF supplied.
+- Creative KB SID 200066 — *Enabling 32bit 384kHz Playback in Windows* — Windows equivalent of the macOS clock-source dance. PDF supplied.
+- [Creative — G6 product page](https://us.creative.com/p/sound-blaster/sound-blasterx-g6-usb-c) — 32-bit/384 kHz, 1 Ω output impedance, optical I/O
 - [Audio Science Review — G6 review and measurements](https://www.audiosciencereview.com/forum/index.php?threads/review-and-measurements-of-sound-blasterx-g6.7016/) — CS43131 DAC, 85 mW into 300 Ω; [page 2](https://www.audiosciencereview.com/forum/index.php?threads/review-and-measurements-of-sound-blasterx-g6.7016/page-2#post-158688) for the Direct Mode null result
-- [Cirrus Logic CS43131](https://www.cirrus.com/products/cs43131) and [datasheet](https://statics.cirrus.com/pubs/proDatasheet/CS43131_DS1155F2.pdf) — the selectable interpolation filters
-- [r/SoundBlasterOfficial — Direct mode vs default on SBX G6](https://www.reddit.com/r/SoundBlasterOfficial/comments/m1paan/direct_mode_vs_default_on_sbx_g6/) — what Direct Mode disables; mic and line-in behaviour
-- [guru3D — Creative G6 DAC/amp thread](https://forums.guru3d.com/threads/purchased-creative-g6-external-dac-amp.428000/page-4) — filter listening impressions, APU bypass
-- [r/SoundBlasterOfficial — Sound BlasterX G6, direct mode question](https://www.reddit.com/r/SoundBlasterOfficial/comments/1556zzq/sound_blasterx_g6_direct_mode_question/) — host-side effects still pass through in Direct Mode; no mic on the G6 in Direct Mode
-- [mobileaudiophile — Creative DAC review](https://mobileaudiophile.com/reviews/creative-soundblaster-g8-dac-the-bridge-between-devices/) — corroborates the 48 kHz DSP-mode ceiling on macOS on a sibling Creative DAC
-- `toga_cocoa/widgets/switch.py` in `venv/` — the `set_value` → `on_change` behaviour behind the profile bug
-- `src/g6_cli/g6_spec/` in this repo — every **[bytes]** claim
+- [Cirrus Logic CS43131](https://www.cirrus.com/products/cs43131) and [datasheet](https://statics.cirrus.com/pubs/proDatasheet/CS43131_DS1155F2.pdf) — selectable interpolation filters
+- [r/SoundBlasterOfficial — Direct mode vs default](https://www.reddit.com/r/SoundBlasterOfficial/comments/m1paan/direct_mode_vs_default_on_sbx_g6/) — what Direct Mode disables
+- [guru3D — G6 DAC/amp thread](https://forums.guru3d.com/threads/purchased-creative-g6-external-dac-amp.428000/page-4) — filter listening impressions
+- [r/SoundBlasterOfficial — direct mode question](https://www.reddit.com/r/SoundBlasterOfficial/comments/1556zzq/sound_blasterx_g6_direct_mode_question/) — host-side effects pass through in Direct Mode
+- [mobileaudiophile — Creative DAC review](https://mobileaudiophile.com/reviews/creative-soundblaster-g8-dac-the-bridge-between-devices/) — corroborates 48 kHz DSP-mode ceiling on macOS on a sibling DAC
+- `toga_cocoa/widgets/switch.py` in `venv/` — the `set_value`→`on_change` behaviour behind the profile bug
+- `src/g6_cli/g6_spec/` in this repo — source for every bytes-derived claim

@@ -107,7 +107,7 @@ long_description = """A desktop GUI for the Sound Blaster X G6, exposing the
 controls of soundblaster-x-g6-cli as native widgets.
 """
 icon = "packaging/resources/g6"
-sources = ["src/g6_gui", "src/g6_cli"]
+sources = ["src/g6_gui", "src/g6_cli", "src/g6_device"]
 requires = [
     "hidapi==0.15.0",
     "pyusb==1.3.1",

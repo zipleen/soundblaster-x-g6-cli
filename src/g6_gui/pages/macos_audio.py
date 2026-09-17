@@ -19,6 +19,7 @@ import asyncio
 from collections.abc import Callable, Coroutine
 
 import toga
+from toga.style.pack import CENTER, ROW, Pack
 
 from g6_gui import coreaudio, help as help_text, widgets
 from g6_gui.controller import G6Controller
@@ -49,6 +50,34 @@ def _status_summary(state: coreaudio.ClockState) -> str:
     source = state.current_clock_source or "unknown"
     fmt = state.current_format.label() if state.current_format else "unknown format"
     return f"Current: {source} \u2014 {fmt}"
+
+
+def _volume_text(state: coreaudio.ClockState) -> str:
+    """The read-only volume line. ``None`` is a real, distinct case -- the
+    device exposes no host-settable volume at all -- not the same as 0%,
+    and is worded to say so rather than silently showing "0%".
+
+    Appends the dB reading in parentheses when it is available -- it is the
+    figure the full-scale warning actually decides from when present (see
+    coreaudio.is_full_scale_volume()), so showing it lets a mismatch between
+    "looks fine as a percentage" and "still above -2 dBFS" be seen directly
+    rather than only inferred from whether the warning appeared.
+    """
+    if state.output_volume is None:
+        return "Output Volume: not reported by this device"
+    text = f"Output Volume: {round(state.output_volume * 100)}%"
+    if state.output_volume_db is not None:
+        text += f" ({state.output_volume_db:.1f} dB)"
+    return text
+
+
+def _channels_text(state: coreaudio.ClockState) -> str:
+    if state.output_channels is None:
+        return "Output Channels: unknown"
+    text = f"Output Channels: {state.output_channels}"
+    if state.non_stereo_formats_available:
+        text += " (a non-stereo format is also offered -- see help)"
+    return text
 
 
 def _make_clock_controller() -> coreaudio.ClockController:
@@ -95,6 +124,27 @@ def build(
     status = widgets.dynamic_note_block("")
     section.add(status)
 
+    # Read-only: a note line, never a slider -- this app deliberately never
+    # moves the user's volume itself (see help_text.MACOS_VOLUME). The (i)
+    # help is attached to the row's caption, not to `volume_note` itself,
+    # because `_DynamicTextBlock.set_text()` clears *all* of its own
+    # children on every update -- anchoring the button there would delete it
+    # the first time the reading changes.
+    volume_row = toga.Box(style=Pack(direction=ROW, align_items=CENTER, gap=8))
+    volume_note = widgets.dynamic_note_block("")
+    volume_row.add(volume_note)
+    volume_group = widgets.with_help(volume_row, help_text.MACOS_VOLUME)
+    section.add(volume_group)
+
+    volume_warning = widgets.dynamic_warning_block("")
+    section.add(volume_warning)
+
+    channels_row = toga.Box(style=Pack(direction=ROW, align_items=CENTER, gap=8))
+    channels_note = widgets.dynamic_note_block("")
+    channels_row.add(channels_note)
+    channels_group = widgets.with_help(channels_row, help_text.MACOS_CHANNELS)
+    section.add(channels_group)
+
     # Guards clock_source_row/format_row's .value while it is set
     # programmatically during a render. Toga's Cocoa backend fires on_change
     # for a programmatic assignment too -- confirmed the hard way once
@@ -119,6 +169,12 @@ def build(
                 widgets.set_enabled(clock_source_row.control_row, False)
                 widgets.set_enabled(format_row.control_row, False)
                 format_row.selection.items = []
+                # Nothing was actually read -- an empty reading, not a "0%"
+                # or "0 channels" one, so these disappear entirely rather
+                # than show a number that was never measured.
+                volume_note.set_text("")
+                volume_warning.set_text("")
+                channels_note.set_text("")
             else:
                 status.set_text(status_message or _status_summary(state))
                 widgets.set_enabled(clock_source_row.control_row, True)
@@ -130,6 +186,14 @@ def build(
                 widgets.set_enabled(format_row.control_row, bool(available))
                 if state.current_format is not None and state.current_format in available:
                     format_row.selection.value = state.current_format.label()
+
+                volume_note.set_text(_volume_text(state))
+                volume_warning.set_text(
+                    help_text.VOLUME_FULL_SCALE_WARNING
+                    if coreaudio.is_full_scale_volume(state.output_volume, state.output_volume_db)
+                    else ""
+                )
+                channels_note.set_text(_channels_text(state))
         finally:
             rendering["active"] = False
 
@@ -191,6 +255,20 @@ def build(
     )
     section.add(format_row)
 
+    # Volume and channel count are picked up by re-reading Core Audio here on
+    # Refresh (and on every clock-source/format switch, via the existing
+    # render(clock.refresh())/render(clock.state) calls above) rather than
+    # via an AudioObjectAddPropertyListener. A real listener would let this
+    # update the instant the menu bar slider moves, but Core Audio delivers
+    # listener callbacks on its own internal dispatch queue, not this app's
+    # asyncio loop -- getting a value back onto Toga's main thread safely
+    # would need its own cross-thread handoff, and get it wrong exactly the
+    # way gotcha 20/25 in HANDOFF.md warn about (trusting an async callback's
+    # timing without polling to confirm it actually landed). Given no G6 is
+    # attached to develop or test that hand-off against, polling on a
+    # deliberate user action (Refresh, or already visiting the tab) is the
+    # honest tradeoff here: a little less live than a listener, but nothing
+    # that can silently race the UI thread.
     refresh_button_row = widgets.button_row(
         ("Refresh", lambda widget, *a, **k: render(clock.refresh()))
     )
@@ -200,6 +278,11 @@ def build(
     content.status = status
     content.clock_source = clock_source_row
     content.format = format_row
+    content.volume = volume_group
+    content.volume_note = volume_note
+    content.volume_warning = volume_warning
+    content.channels = channels_group
+    content.channels_note = channels_note
     content.refresh_button = refresh_button_row.buttons[0]
     content.clock_controller = clock  # exposed for tests and diagnostics
 

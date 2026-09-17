@@ -26,6 +26,8 @@ class FakeHal(Hal):
         current_format: Format | None = None,
         device_name: str = "Fake G6",
         present: bool = True,
+        output_volume: float | None = 0.8,
+        output_volume_db: float | None = None,
     ):
         self.device_id = 1
         self.stream_id = 10
@@ -49,6 +51,19 @@ class FakeHal(Hal):
             ],
         }
         self.current_format_value = current_format or self.formats_by_code[current_clock_source_code][1]
+
+        # None means "no host-settable volume at all" -- a distinct, real
+        # case tests can opt into explicitly; the 0.8 default keeps every
+        # existing test (written before volume reading existed) exercising
+        # a plain, non-full-scale reading rather than an untested None.
+        self.output_volume_value = output_volume
+
+        # dB reading, mirroring output_volume above. Defaults to None --
+        # "vold unreachable" -- rather than some default that would exercise
+        # the dB path automatically in every existing test, which was
+        # written before this field existed. Tests that want the dB path
+        # (the whole point of task 3 here) pass this explicitly.
+        self.output_volume_db_value = output_volume_db
 
         self.calls: list[tuple[str, dict]] = []
         self.reject_clock_source_set = False  # simulate a set() that silently does not take
@@ -117,3 +132,11 @@ class FakeHal(Hal):
         if self.reject_format_set:
             return
         self.current_format_value = fmt
+
+    def output_volume(self, device_id: int) -> float | None:
+        self._record("output_volume", device_id=device_id)
+        return self.output_volume_value
+
+    def output_volume_db(self, device_id: int) -> float | None:
+        self._record("output_volume_db", device_id=device_id)
+        return self.output_volume_db_value

@@ -7,6 +7,7 @@ from g6_cli.g6_spec import BOTH_CHANNELS, Channel, PlaybackFilter, SmartVolumeSp
 from g6_cli.g6_spec.decoder import DecoderMode
 from g6_cli.g6_spec.recording import MicrophoneEqualizerPreset
 from g6_gui import convert
+from g6_gui.filters import NON_OVERSAMPLING
 
 
 def test_channel_labels_are_the_cli_choices():
@@ -42,9 +43,29 @@ def test_profile_labels_match_model_enum():
 
 def test_filter_labels_are_human_readable_and_round_trip():
     assert "Fast Roll Off - Minimum Phase" in convert.FILTER_LABELS
-    assert len(convert.FILTER_LABELS) == len(list(PlaybackFilter))
+    # One entry per real PlaybackFilter member, plus the NOS shim (see
+    # g6_gui.filters -- it is deliberately not a PlaybackFilter member).
+    assert len(convert.FILTER_LABELS) == len(list(PlaybackFilter)) + 1
     for label in convert.FILTER_LABELS:
         assert convert.label_from_filter(convert.filter_from_label(label)) == label
+
+
+def test_the_four_creative_filters_are_unchanged():
+    assert convert.FILTER_LABELS[:4] == [
+        "Fast Roll Off - Minimum Phase",
+        "Slow Roll Off - Minimum Phase",
+        "Fast Roll Off - Linear Phase",
+        "Slow Roll Off - Linear Phase",
+    ]
+    for playback_filter, label in zip(list(PlaybackFilter), convert.FILTER_LABELS):
+        assert convert.filter_from_label(label) is playback_filter
+        assert convert.label_from_filter(playback_filter) == label
+
+
+def test_nos_is_offered_last_and_labelled_exactly():
+    assert convert.FILTER_LABELS[-1] == "Non-Over-Sampling (NOS)"
+    assert convert.filter_from_label("Non-Over-Sampling (NOS)") is NON_OVERSAMPLING
+    assert convert.label_from_filter(NON_OVERSAMPLING) == "Non-Over-Sampling (NOS)"
 
 
 def test_decoder_labels():

@@ -20,7 +20,31 @@ OUTPUT = (
     "\n"
     "The 5.1 and 7.1 variants in the CLI send identical bytes to stereo — the "
     "channel count is decided by the operating system, not the device, and "
-    "Creative's own software describes 5.1 and 7.1 as virtual outputs."
+    "Creative's own software describes 5.1 and 7.1 as virtual outputs. See "
+    "the Virtual 7.1 note for what that actually means."
+)
+
+SURROUND_71 = (
+    "Virtual 7.1 is real, but it is not extra jacks. The G6 has exactly two "
+    "analog output channels. In 7.1 mode the computer streams 8 channels over "
+    "USB and the G6's own DSP renders them down to a binaural stereo mix — "
+    "the surround processing happens inside the device, not on the computer. "
+    "Firmware disassembly confirms this.\n"
+    "\n"
+    "Direct Mode turns it off. Direct stops every effect parameter reaching "
+    "the DSP, so a 7.1 stream is then just flat-downmixed with no "
+    "virtualization at all.\n"
+    "\n"
+    "What nobody has is a way to switch the channel count. These 5.1 and 7.1 "
+    "buttons send the same bytes as Stereo — upstream says so in its own "
+    "source. On Windows the count comes from the audio driver's own settings, "
+    "not from a command to the device. The firmware does implement a "
+    "speaker-config command, but its format has never been decoded.\n"
+    "\n"
+    "On macOS the G6 has been measured offering nothing but stereo formats, "
+    "so it stays a 2-channel device there regardless.\n"
+    "\n"
+    "Source: the g6-re firmware analysis, and docs/settings-reference.md."
 )
 
 _DIRECT_MODE_COMMON = (
@@ -37,7 +61,12 @@ _DIRECT_MODE_COMMON = (
     "\n"
     "Note that on the device this is one position of a three-way Output Mode "
     "setting (Audio Effects / Direct / SPDIF-Out Direct), so turning this on "
-    "automatically turns SPDIF-Out Direct off."
+    "automatically turns SPDIF-Out Direct off.\n"
+    "\n"
+    "What it does inside the device is now known rather than assumed: the "
+    "firmware simply stops writing effect parameters to the audio DSP. Only "
+    "master volume still gets through. That is why every effect goes quiet at "
+    "once, and why it is enforced no matter what the host asks for."
 )
 
 DIRECT_MODE_MACOS = (
@@ -102,7 +131,42 @@ FILTER = (
     "\n"
     "If you want a rule: Slow Roll Off / Minimum Phase rings least, Fast Roll "
     "Off / Linear Phase measures flattest. The device default is Fast Roll Off "
-    "/ Minimum Phase."
+    "/ Minimum Phase.\n"
+    "\n"
+    "Non-Over-Sampling is a fifth filter the device supports but Creative's "
+    "own app hides. It is offered here, with a warning — see its own help."
+)
+
+FILTER_NOS = (
+    "Non-Over-Sampling (NOS) is a real mode of the CS43131 DAC that Creative's "
+    "software deliberately hides: their app builds the filter list and skips "
+    "this entry by name. The device accepts it; only the UI omitted it.\n"
+    "\n"
+    "It bypasses the DAC's interpolation filter entirely. That removes all "
+    "pre-ringing and minimises delay, which is the whole appeal — but it also "
+    "rolls the treble off (about -3.2 dB at 20 kHz with 44.1 kHz material, and "
+    "it gets worse the lower the sample rate) and leaves the images above "
+    "Nyquist unfiltered.\n"
+    "\n"
+    "So: measurably the worst of the five, audibly a matter of taste, and not "
+    "a mode to leave selected by accident. Pick Fast Roll Off / Minimum Phase "
+    "to get back to the device default.\n"
+    "\n"
+    "Playing at a higher sample rate reduces the droop, because the hold step "
+    "gets shorter — at 192 kHz it is a fraction of a dB at 20 kHz.\n"
+    "\n"
+    "One quirk: this filter is not recorded in the settings log the way the "
+    "other four are, because that file is shared with the command-line tool, "
+    "which only knows Creative's four. The device applies it immediately and "
+    "remembers it in its own firmware — but this app will show the previous "
+    "filter again next time it starts."
+)
+
+FILTER_NOS_WARNING = (
+    "Non-Over-Sampling is selected. This bypasses the DAC's reconstruction "
+    "filter: expect rolled-off treble and unfiltered images above Nyquist. "
+    "Creative hide this filter in their own app. Choose another filter to "
+    "return to normal behaviour."
 )
 
 DECODER = (
@@ -358,6 +422,50 @@ MACOS_FORMAT = (
     "Creative say macOS does not support DSD playback at all."
 )
 
+MACOS_VOLUME = (
+    "The G6's output volume as macOS sees it, read from Core Audio. It is "
+    "shown here rather than controlled because this app does not want to move "
+    "your volume behind your back — use the menu bar or the keyboard.\n"
+    "\n"
+    "This slider is the G6's own volume control, not a computer-side one: the "
+    "device tells macOS it has a hardware volume, so macOS hands the setting "
+    "to the G6 rather than quietly turning the audio down itself. Confirmed "
+    "against the real device.\n"
+    "\n"
+    "It is displayed because of one specific, measured problem: at full scale "
+    "the G6 distorts. See the warning that appears when you reach 100%."
+)
+
+VOLUME_FULL_SCALE_WARNING = (
+    "Volume is at 100%, where the G6 measurably distorts. Audio Science "
+    "Review found low-frequency distortion approaching 1% at 20 Hz at full "
+    "scale; dropping just 2 dB removed it entirely and improved SINAD from "
+    "about 107 dB to 112 dB.\n"
+    "\n"
+    "It is a hardware limit, not a bug that can be patched: the device is USB "
+    "powered and runs short of supply headroom driving the DAC at full scale. "
+    "Firmware disassembly of every release from 2019 to 2025 shows the gain "
+    "constants are byte-identical, so it was never fixed and will not be.\n"
+    "\n"
+    "Drop the volume a couple of steps — around 90% is plenty — and the "
+    "distortion is gone. You lose a little maximum loudness and nothing else."
+)
+
+MACOS_CHANNELS = (
+    "How many channels macOS is streaming to the G6.\n"
+    "\n"
+    "On macOS this is 2, and measurement on a real G6 confirms the device "
+    "offers nothing else — every format it advertises to Core Audio is "
+    "stereo. It is not that this app declines to ask for more; there is "
+    "nothing else to ask for.\n"
+    "\n"
+    "The reason is not macOS being restrictive. Nobody has a working way to "
+    "change the G6's channel count on any operating system: on Windows it "
+    "comes from the audio driver's own settings rather than a command to the "
+    "device, and the command the firmware does implement has never been "
+    "decoded. See the Virtual 7.1 note on the Playback tab."
+)
+
 # ── Mixer ───────────────────────────────────────────────────────────────────
 
 MIXER_SOURCE = (
@@ -379,6 +487,30 @@ SYSTEM_CLAIM = (
     "\n"
     "While claimed, your system has no audio output through the G6. The "
     "interface is released again when you turn this off or quit."
+)
+
+
+SYSTEM_DEVICE_INFO = (
+    "What the G6 reports about itself in its USB descriptors: a device "
+    "revision number, the product and manufacturer names, and the serial "
+    "number. Nothing is sent to the device to read this — the operating "
+    "system already has it.\n"
+    "\n"
+    "This is deliberately not called a firmware version, because it is not "
+    "one. The revision is a 16-bit field; a G6 firmware version looks like "
+    "2.1.250903.1324 and does not fit in it.\n"
+    "\n"
+    "The real firmware version cannot currently be read at all. The G6's "
+    "control protocol is write-only in everything this app does, and "
+    "Creative's own tool reads the version through a proprietary Windows "
+    "library rather than over the wire, so the request has never been "
+    "captured. The device does implement a read command; nobody has decoded "
+    "its format yet. There is a probe script in the repository for anyone "
+    "who wants to try.\n"
+    "\n"
+    "For reference, the latest published firmware is 2.1.250903.1324 "
+    "(September 2025). Updating is Windows-only, and there is little reason "
+    "to: the audio and gain code has not changed by a single byte since 2019."
 )
 
 

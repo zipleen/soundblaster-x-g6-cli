@@ -109,3 +109,74 @@ async def test_on_success_is_skipped_when_the_call_fails():
     await controller.flush()
     assert seen == []
     controller.shutdown()
+
+
+# ── tolerate ──
+#
+# Motivating case: g6_gui.filters.NON_OVERSAMPLING. The real G6Api.playback_filter()
+# writes the correct bytes to the wire *before* G6Model rejects the shim with
+# a ValueError, so that ValueError must not be treated as a failure. These
+# tests exercise the mechanism generically through FakeG6Api.fail_next(),
+# which is enough to prove the controller's handling of "the call raised
+# this exception type" -- whichever upstream step actually raised it.
+
+
+async def test_tolerated_exception_does_not_revert_or_error_and_runs_on_success():
+    seen = {}
+    reverted = []
+    api = FakeG6Api()
+    api.fail_next(ValueError("playback_filter_enum must be PlaybackFilter"))
+    controller = G6Controller(api, on_error=lambda message: seen.setdefault("error", message))
+    controller.submit(
+        "playback_filter",
+        playback_filter_enum=object(),
+        revert=lambda: reverted.append(True),
+        on_success=lambda: seen.setdefault("success", True),
+        tolerate=(ValueError,),
+    )
+    await controller.flush()
+    assert "error" not in seen
+    assert reverted == []
+    assert seen.get("success") is True
+    controller.shutdown()
+
+
+async def test_an_exception_type_not_listed_in_tolerate_still_reverts_and_errors():
+    # The negative case: tolerate=(ValueError,) must not swallow a different
+    # exception type. A genuine failure from one of the four real filters
+    # (or anything else) must still behave exactly as it did before
+    # `tolerate` existed.
+    seen = {}
+    reverted = []
+    api = FakeG6Api()
+    api.fail_next(RuntimeError("genuinely broken"))
+    controller = G6Controller(api, on_error=lambda message: seen.setdefault("error", message))
+    controller.submit(
+        "playback_filter",
+        playback_filter_enum=object(),
+        revert=lambda: reverted.append(True),
+        on_success=lambda: seen.setdefault("success", True),
+        tolerate=(ValueError,),
+    )
+    await controller.flush()
+    assert "genuinely broken" in seen["error"]
+    assert reverted == [True]
+    assert "success" not in seen
+    controller.shutdown()
+
+
+async def test_tolerate_defaults_to_empty_and_changes_nothing_by_default():
+    seen = {}
+    reverted = []
+    api = FakeG6Api()
+    api.fail_next(ValueError("some genuine validation error"))
+    controller = G6Controller(api, on_error=lambda message: seen.setdefault("error", message))
+    controller.submit(
+        "playback_filter",
+        playback_filter_enum=object(),
+        revert=lambda: reverted.append(True),
+    )
+    await controller.flush()
+    assert "error" in seen
+    assert reverted == [True]
+    controller.shutdown()

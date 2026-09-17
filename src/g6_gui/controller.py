@@ -56,6 +56,7 @@ class G6Controller:
         *,
         revert: Callable[[], None] | None = None,
         on_success: Callable[[], None] | None = None,
+        tolerate: tuple[type[BaseException], ...] = (),
         **kwargs,
     ) -> None:
         """Fire a device call from a synchronous Toga handler. Returns immediately.
@@ -63,8 +64,23 @@ class G6Controller:
         `on_success` runs only if the call succeeded, as part of the same tracked
         unit of work that `flush()` awaits — so a caller doing
         `submit(...); await flush()` is guaranteed to observe its effect.
+
+        `tolerate` exists for exactly one situation: a caller that knows, for
+        this specific call, the device write has already completed by the
+        time some downstream bookkeeping in the API can raise. The motivating
+        case is g6_gui.filters.NON_OVERSAMPLING — G6Api.playback_filter()
+        writes the correct bytes to the wire first and only afterwards tries
+        to record the shim in G6Model, which rejects it with a ValueError
+        (see filters.py's docstring for the full chain). Treating that as a
+        failure would be wrong twice over: it would revert a dropdown back
+        to a value the hardware no longer holds, and it would show an error
+        for a call that, on the wire, succeeded. An exception whose type is
+        in `tolerate` is therefore swallowed rather than reverted or
+        reported, and `on_success` still runs, exactly as on a clean success.
+        Everything not in `tolerate` behaves exactly as before this
+        parameter existed.
         """
-        self._spawn(self._guarded(method, revert, kwargs, on_success))
+        self._spawn(self._guarded(method, revert, kwargs, on_success, tolerate))
 
     def debounced(
         self,
@@ -129,7 +145,14 @@ class G6Controller:
         task.add_done_callback(self._in_flight.discard)
         return task
 
-    async def _guarded(self, method: str, revert, kwargs: dict, on_success=None) -> None:
+    async def _guarded(
+        self,
+        method: str,
+        revert,
+        kwargs: dict,
+        on_success=None,
+        tolerate: tuple[type[BaseException], ...] = (),
+    ) -> None:
         try:
             await self.call(method, **kwargs)
         except asyncio.CancelledError:
@@ -138,12 +161,19 @@ class G6Controller:
             # The device vanished. The app returns to its "connect your G6" gate.
             if self._on_device_lost is not None:
                 self._on_device_lost(exc)
+            return
+        except tolerate:
+            # See submit()'s `tolerate` docstring: the caller has already
+            # decided the device write behind this exception succeeded, so
+            # this is not a failure -- fall through to on_success below
+            # exactly as the no-exception path does.
+            pass
         except Exception as exc:  # noqa: BLE001 - surfaced to the user, not swallowed
             traceback.print_exc(file=sys.stderr)
             if revert is not None:
                 revert()
             if self._on_error is not None:
                 self._on_error(f"{method} failed: {exc}")
-        else:
-            if on_success is not None:
-                on_success()
+            return
+        if on_success is not None:
+            on_success()

@@ -10,6 +10,8 @@ from g6_cli.g6_spec import BOTH_CHANNELS, Channel, PlaybackFilter, SmartVolumeSp
 from g6_cli.g6_spec.decoder import DecoderMode
 from g6_cli.g6_spec.recording import MicrophoneEqualizerPreset
 
+from g6_gui.filters import NON_OVERSAMPLING
+
 # ── Channels ──
 
 CHANNEL_LABELS: list[str] = ["Both", "Left", "Right"]
@@ -45,12 +47,20 @@ def profile_from_label(label: str) -> Profile.Name:
 
 
 # ── Playback filter ──
+#
+# NON_OVERSAMPLING is not a PlaybackFilter member -- it can't be, since that
+# enum lives in the frozen src/g6_cli mirror (HANDOFF.md §2). It is a
+# separate object (see g6_gui.filters) that duck-types the one attribute
+# upstream reads off it. It is listed LAST on purpose, after the four
+# Creative-supported filters, so nobody selects the hidden filter by
+# accident.
 
-_FILTER_LABELS: dict[PlaybackFilter, str] = {
+_FILTER_LABELS: dict[object, str] = {
     PlaybackFilter.FAST_ROLL_OFF_MINIMUM_PHASE: "Fast Roll Off - Minimum Phase",
     PlaybackFilter.SLOW_ROLL_OFF_MINIMUM_PHASE: "Slow Roll Off - Minimum Phase",
     PlaybackFilter.FAST_ROLL_OFF_LINEAR_PHASE: "Fast Roll Off - Linear Phase",
     PlaybackFilter.SLOW_ROLL_OFF_LINEAR_PHASE: "Slow Roll Off - Linear Phase",
+    NON_OVERSAMPLING: "Non-Over-Sampling (NOS)",
 }
 
 FILTER_LABELS: list[str] = list(_FILTER_LABELS.values())
@@ -63,7 +73,7 @@ def filter_from_label(label: str) -> PlaybackFilter:
     raise ValueError(f"Unsupported playback filter: {label}")
 
 
-def label_from_filter(playback_filter: PlaybackFilter) -> str:
+def label_from_filter(playback_filter) -> str:
     return _FILTER_LABELS[playback_filter]
 
 

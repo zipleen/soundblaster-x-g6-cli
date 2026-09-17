@@ -15,3 +15,6 @@ dist/
 # Reference PDFs saved locally while researching docs/settings-reference.md.
 # Creative copyright, so not redistributed with the project.
 docs/pdfs/
+
+# Briefcase packaging logs
+logs/

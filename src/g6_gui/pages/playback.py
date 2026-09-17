@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import toga
 
-from g6_gui import convert, help as help_text, widgets
+from g6_gui import convert, filters, help as help_text, widgets
 from g6_gui.controller import G6Controller
 from g6_gui.platform import (
     AUDIO_INTERFACE_SUPPORTED,
@@ -116,17 +116,76 @@ def build(controller: G6Controller) -> toga.Widget:
                 )
             )
 
+    initial_filter_label = convert.label_from_filter(playback_model.get_filter())
+    nos_label = convert.label_from_filter(filters.NON_OVERSAMPLING)
+
+    filter_warning = widgets.dynamic_warning_block(
+        help_text.FILTER_NOS_WARNING if initial_filter_label == nos_label else ""
+    )
+
+    def _filter_warning_text(label: str) -> str:
+        return help_text.FILTER_NOS_WARNING if label == nos_label else ""
+
+    # `filter_state["label"]` tracks the last label the device actually
+    # confirmed (i.e. the revert target). `filter_state["reverting"]` guards
+    # against gotcha 12 (Toga's Cocoa backend fires on_change for a
+    # *programmatic* value assignment): _revert() below sets
+    # `widget.value = previous_label`, which would otherwise re-enter
+    # _on_filter_change and resubmit the very filter being reverted to.
+    filter_state = {"label": initial_filter_label, "reverting": False}
+
+    def _on_filter_change(widget) -> None:
+        if filter_state["reverting"]:
+            return
+
+        previous_label = filter_state["label"]
+        selected = convert.filter_from_label(widget.value)
+
+        def _revert() -> None:
+            filter_state["reverting"] = True
+            try:
+                widget.value = previous_label
+            finally:
+                filter_state["reverting"] = False
+            filter_warning.set_text(_filter_warning_text(previous_label))
+
+        def _on_success() -> None:
+            filter_state["label"] = widget.value
+
+        # Only the NOS shim gets `tolerate`: G6Api.playback_filter() writes
+        # the correct bytes to the wire *before* trying to record the value
+        # in G6Model, and only the shim (see filters.py's docstring) makes
+        # that second step raise ValueError. A ValueError from one of the
+        # four real filters would be a genuine failure and must still revert
+        # and surface an error, so this is scoped to `selected is
+        # filters.NON_OVERSAMPLING` rather than to ValueError in general.
+        tolerate = (ValueError,) if selected is filters.NON_OVERSAMPLING else ()
+        controller.submit(
+            "playback_filter",
+            playback_filter_enum=selected,
+            revert=_revert,
+            on_success=_on_success,
+            tolerate=tolerate,
+        )
+        filter_warning.set_text(_filter_warning_text(widget.value))
+
     filter_row = widgets.select_row(
         "Filter",
         items=convert.FILTER_LABELS,
-        value=convert.label_from_filter(playback_model.get_filter()),
-        on_change=lambda widget: controller.submit(
-            "playback_filter",
-            playback_filter_enum=convert.filter_from_label(widget.value),
-        ),
+        value=initial_filter_label,
+        on_change=_on_filter_change,
         help=help_text.FILTER,
     )
-    hid_section.add(filter_row)
+    # Grouped in its own box (rather than added straight to hid_section) so
+    # the FILTER_NOS help expands right below the warning it explains,
+    # instead of at the bottom of the whole Playback section.
+    filter_group = toga.Box(style=toga.style.pack.Pack(direction=toga.style.pack.COLUMN))
+    filter_group.add(filter_row)
+    filter_group.add(filter_warning)
+    # FILTER's help text ends with "see its own help" -- this is that help,
+    # attached to the warning it explains.
+    widgets.help_for(filter_group, anchor=filter_warning, text=help_text.FILTER_NOS)
+    hid_section.add(filter_group)
 
     decoder_row = widgets.select_row(
         "Decoder mode",
@@ -146,6 +205,7 @@ def build(controller: G6Controller) -> toga.Widget:
     content.direct_mode = direct_mode_row
     content.spdif_direct_mode = spdif_direct_mode_row
     content.filter = filter_row
+    content.filter_warning = filter_warning
     content.decoder = decoder_row
 
     if AUDIO_INTERFACE_SUPPORTED:
@@ -220,16 +280,31 @@ def _build_audio_section(controller: G6Controller, playback_model) -> toga.Box:
         ("5.1", lambda widget: controller.submit("playback_speakers_to_5_1")),
         ("7.1", lambda widget: controller.submit("playback_speakers_to_7_1")),
     )
-    audio_section.add(widgets.note("Speakers"))
-    audio_section.add(speakers_buttons)
-
     headphones_buttons = widgets.button_row(
         ("Stereo", lambda widget: controller.submit("playback_headphones_to_stereo")),
         ("5.1", lambda widget: controller.submit("playback_headphones_to_5_1")),
         ("7.1", lambda widget: controller.submit("playback_headphones_to_7_1")),
     )
-    audio_section.add(widgets.note("Headphones"))
-    audio_section.add(headphones_buttons)
+
+    # These four rows share one (i), because they share one caveat: 5.1 and 7.1
+    # send byte-identical packets to Stereo (upstream says so in its own
+    # docstring in g6_spec/playback.py), so what they actually change is
+    # unconfirmed. help_text.SURROUND_71 explains what virtual 7.1 really is
+    # and where the channel count is decided. Grouped into their own box so the
+    # explanation expands below all four rows rather than wedging between the
+    # Speakers and Headphones halves -- the same reason help_for() exists.
+    channel_group = toga.Box()
+    channel_group.style.direction = "column"
+    channel_group.add(widgets.note("Speakers"))
+    channel_group.add(speakers_buttons)
+    channel_group.add(widgets.note("Headphones"))
+    channel_group.add(headphones_buttons)
+    widgets.help_for(channel_group, anchor=speakers_buttons, text=help_text.SURROUND_71)
+    audio_section.add(channel_group)
+
+    audio_section.channel_modes = channel_group
+    audio_section.speakers_modes = speakers_buttons
+    audio_section.headphones_modes = headphones_buttons
 
     return audio_section
 
